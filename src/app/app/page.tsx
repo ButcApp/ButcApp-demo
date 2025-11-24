@@ -434,7 +434,7 @@ export default function CepFinansApp() {
     }
   }
 
-  const totalBalance = balances.cash + balances.bank + balances.savings
+  const totalBalance = (balances.cash || 0) + (balances.bank || 0) + (balances.savings || 0)
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
   
@@ -804,7 +804,7 @@ export default function CepFinansApp() {
               <Wallet className="h-5 w-5 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">₺{balances.cash.toFixed(2)}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">₺{(balances.cash || 0).toFixed(2)}</div>
             </CardContent>
           </Card>
 
@@ -814,7 +814,7 @@ export default function CepFinansApp() {
               <Building className="h-5 w-5 text-blue-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">₺{balances.bank.toFixed(2)}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">₺{(balances.bank || 0).toFixed(2)}</div>
             </CardContent>
           </Card>
 
@@ -824,7 +824,7 @@ export default function CepFinansApp() {
               <PiggyBank className="h-5 w-5 text-purple-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">₺{balances.savings.toFixed(2)}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">₺{(balances.savings || 0).toFixed(2)}</div>
             </CardContent>
           </Card>
 
@@ -988,9 +988,9 @@ export default function CepFinansApp() {
                     <PieChart>
                       <Pie
                         data={[
-                          { name: 'Nakit', value: balances.cash, color: '#10b981' },
-                          { name: 'Banka', value: balances.bank, color: '#3b82f6' },
-                          { name: 'Birikim', value: balances.savings, color: '#8b5cf6' }
+                          { name: 'Nakit', value: balances.cash || 0, color: '#10b981' },
+                          { name: 'Banka', value: balances.bank || 0, color: '#3b82f6' },
+                          { name: 'Birikim', value: balances.savings || 0, color: '#8b5cf6' }
                         ]}
                         cx="50%"
                         cy="50%"
@@ -1001,9 +1001,9 @@ export default function CepFinansApp() {
                         dataKey="value"
                       >
                         {[
-                          { name: 'Nakit', value: balances.cash, color: '#10b981' },
-                          { name: 'Banka', value: balances.bank, color: '#3b82f6' },
-                          { name: 'Birikim', value: balances.savings, color: '#8b5cf6' }
+                          { name: 'Nakit', value: balances.cash || 0, color: '#10b981' },
+                          { name: 'Banka', value: balances.bank || 0, color: '#3b82f6' },
+                          { name: 'Birikim', value: balances.savings || 0, color: '#8b5cf6' }
                         ].map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
@@ -1016,15 +1016,15 @@ export default function CepFinansApp() {
                 <div className="grid grid-cols-3 gap-4 mt-4">
                   <div className="text-center p-3 bg-green-100 dark:bg-green-900/20 rounded-lg">
                     <div className="text-green-800 dark:text-green-200 font-semibold">{t('app.cash')}</div>
-                    <div className="text-green-600 dark:text-green-400 text-xl font-bold">₺{balances.cash.toFixed(2)}</div>
+                    <div className="text-green-600 dark:text-green-400 text-xl font-bold">₺{(balances.cash || 0).toFixed(2)}</div>
                   </div>
                   <div className="text-center p-3 bg-blue-100 dark:bg-blue-900/20 rounded-lg">
                     <div className="text-blue-800 dark:text-blue-200 font-semibold">{t('app.bank')}</div>
-                    <div className="text-blue-600 dark:text-blue-400 text-xl font-bold">₺{balances.bank.toFixed(2)}</div>
+                    <div className="text-blue-600 dark:text-blue-400 text-xl font-bold">₺{(balances.bank || 0).toFixed(2)}</div>
                   </div>
                   <div className="text-center p-3 bg-purple-100 dark:bg-purple-900/20 rounded-lg">
                     <div className="text-purple-800 dark:text-purple-200 font-semibold">{t('app.savings')}</div>
-                    <div className="text-purple-600 dark:text-purple-400 text-xl font-bold">₺{balances.savings.toFixed(2)}</div>
+                    <div className="text-purple-600 dark:text-purple-400 text-xl font-bold">₺{(balances.savings || 0).toFixed(2)}</div>
                   </div>
                 </div>
               </div>
@@ -1665,9 +1665,9 @@ function TransferForm({
   })
 
   const accounts = [
-    { value: 'cash', label: t('app.cash'), icon: Wallet, balance: balances.cash },
-    { value: 'bank', label: t('app.bank'), icon: Building, balance: balances.bank },
-    { value: 'savings', label: t('app.savings'), icon: PiggyBank, balance: balances.savings }
+    { value: 'cash', label: t('app.cash'), icon: Wallet, balance: balances.cash || 0 },
+    { value: 'bank', label: t('app.bank'), icon: Building, balance: balances.bank || 0 },
+    { value: 'savings', label: t('app.savings'), icon: PiggyBank, balance: balances.savings || 0 }
   ]
 
   const availableToAccounts = accounts.filter(acc => acc.value !== formData.from)
@@ -1677,7 +1677,7 @@ function TransferForm({
     if (!formData.amount || parseFloat(formData.amount) <= 0) return
 
     const amount = parseFloat(formData.amount)
-    if (amount > balances[formData.from]) {
+    if (amount > (balances[formData.from] || 0)) {
       alert(t('app.insufficientBalance'))
       return
     }
@@ -1755,7 +1755,7 @@ function TransferForm({
           value={formData.amount}
           onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
           placeholder="0.00"
-          max={balances[formData.from]}
+          max={balances[formData.from] || 0}
           required
         />
         {fromAccount && (

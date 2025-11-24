@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { TrendingUp, TrendingDown, Plus, DollarSign, Coins, Bitcoin, ArrowUpDown, Calculator, Calendar, RefreshCw, Eye, Home, ArrowLeft, Table as TableIcon } from 'lucide-react'
 import { useLanguage } from '@/contexts/LanguageContext'
+import { dataSync } from '@/lib/data-sync'
 import Link from 'next/link'
 
 interface ExchangeRate {
@@ -149,7 +150,20 @@ export default function InvestmentsPage() {
   // Döviz kurlarını çek
   useEffect(() => {
     fetchExchangeRates()
+    // Döviz yatırımlarını Supabase'den yükle
+    loadCurrencyInvestments()
   }, [])
+
+  // Döviz yatırımlarını Supabase'den yükle
+  const loadCurrencyInvestments = async () => {
+    try {
+      const investments = await dataSync.getCurrencyInvestments()
+      console.log('Loaded currency investments from Supabase:', investments)
+      setCurrencyInvestments(investments)
+    } catch (error) {
+      console.error('Döviz yatırımları yüklenirken hata:', error)
+    }
+  }
 
   const fetchExchangeRates = async () => {
     setLoadingRates(true)
@@ -423,27 +437,48 @@ export default function InvestmentsPage() {
     console.log('✅ Investment created:', newInvestment)
     console.log('=== END DEBUG ===')
 
-    setCurrencyInvestments(prev => [newInvestment, ...prev])
-    setCurrencyForm({
-      currency: '',
-      currencyCode: '',
-      buyDate: '',
-      buyAmount: '',
-      buyRate: ''
-    })
-    setHistoricalRates([])
-    setShowAddCurrency(false)
+    // Supabase'e kaydet
+    try {
+      const success = await dataSync.addCurrencyInvestment(newInvestment)
+      if (success) {
+        console.log('✅ Currency investment saved to Supabase')
+        setCurrencyInvestments(prev => [newInvestment, ...prev])
+        
+        // Formu temizle
+        setCurrencyForm({
+          currency: '',
+          currencyCode: '',
+          buyDate: '',
+          buyAmount: '',
+          buyRate: ''
+        })
+        setHistoricalRates([])
+        setShowAddCurrency(false)
 
-    // Kullanıcıyı bilgilendir
-    if (rateDifference !== 0) {
+        // Kullanıcıyı bilgilendir
+        if (rateDifference !== 0) {
+          setNotification({
+            type: rateDifference > 0 ? 'success' : 'warning',
+            message: `${currencyForm.currencyCode} kur farkı: ${rateDifference > 0 ? '+' : ''}${formatNumber(rateDifferencePercent)}% (${rateDifference > 0 ? 'artış' : 'düşüş'})`
+          })
+        }
+      } else {
+        console.log('❌ Failed to save currency investment to Supabase')
+        setNotification({
+          type: 'error',
+          message: 'Döviz yatırımı kaydedilirken hata oluştu. Lütfen tekrar deneyin.'
+        })
+      }
+    } catch (error) {
+      console.error('❌ Error saving currency investment:', error)
       setNotification({
-        type: rateDifference > 0 ? 'success' : 'warning',
-        message: `${currencyForm.currencyCode} kur farkı: ${rateDifference > 0 ? '+' : ''}${formatNumber(rateDifferencePercent)}% (${rateDifference > 0 ? 'artış' : 'düşüş'})`
+        type: 'error',
+        message: 'Döviz yatırımı kaydedilirken hata oluştu. Lütfen tekrar deneyin.'
       })
     }
   }
 
-  const addQuickInvestment = () => {
+  const addQuickInvestment = async () => {
     console.log('=== QUICK INVESTMENT SUBMISSION DEBUG ===')
     console.log('Selected currency:', selectedCurrency)
     console.log('Quick form data:', quickInvestForm)
@@ -527,23 +562,46 @@ export default function InvestmentsPage() {
     }
 
     console.log('✅ Quick Investment created:', newInvestment)
-    console.log('=== END QUICK INVESTMENT DEBUG ===')
+    console.log('=== END QUICK DEBUG ===')
 
-    setCurrencyInvestments(prev => [newInvestment, ...prev])
-    setQuickInvestForm({
-      buyDate: '',
-      buyAmount: '',
-      buyRate: ''
-    })
-    setQuickHistoricalRates([])
-    setSelectedCurrency(null)
-    setShowQuickInvest(false)
+    // Supabase'e kaydet
+    try {
+      const success = await dataSync.addCurrencyInvestment(newInvestment)
+      if (success) {
+        console.log('✅ Quick investment saved to Supabase')
+        setCurrencyInvestments(prev => [newInvestment, ...prev])
+        
+        // Formu temizle
+        setQuickInvestForm({
+          buyDate: '',
+          buyAmount: '',
+          buyRate: ''
+        })
+        setQuickHistoricalRates([])
+        setSelectedCurrency(null)
+        setShowQuickInvest(false)
 
-    // Kullanıcıyı bilgilendir
-    if (rateDifference !== 0) {
+        // Kullanıcıyı bilgilendir
+        const rateDiff = currentRate - buyRate
+        const rateDiffPercent = buyRate > 0 ? (rateDiff / buyRate) * 100 : 0
+        if (rateDiff !== 0) {
+          setNotification({
+            type: rateDiff > 0 ? 'success' : 'warning',
+            message: `Hızlı yatırım: ${selectedCurrency.code} kur farkı: ${rateDiff > 0 ? '+' : ''}${formatNumber(rateDiffPercent)}% (${rateDiff > 0 ? 'artış' : 'düşüş'})`
+          })
+        }
+      } else {
+        console.log('❌ Failed to save quick investment to Supabase')
+        setNotification({
+          type: 'error',
+          message: 'Hızlı döviz yatırımı kaydedilirken hata oluştu. Lütfen tekrar deneyin.'
+        })
+      }
+    } catch (error) {
+      console.error('❌ Error saving quick investment:', error)
       setNotification({
-        type: rateDifference > 0 ? 'success' : 'warning',
-        message: `Hızlı yatırım ${selectedCurrency.code} kur farkı: ${rateDifference > 0 ? '+' : ''}${formatNumber(rateDifferencePercent)}% (${rateDifference > 0 ? 'artış' : 'düşüş'})`
+        type: 'error',
+        message: 'Hızlı döviz yatırımı kaydedilirken hata oluştu. Lütfen tekrar deneyin.'
       })
     }
   }
@@ -628,13 +686,34 @@ export default function InvestmentsPage() {
     }).format(amount)
   }
 
-  const deleteInvestment = (type: 'currency' | 'metal' | 'crypto', id: string) => {
-    if (type === 'currency') {
-      setCurrencyInvestments(prev => prev.filter(inv => inv.id !== id))
-    } else if (type === 'metal') {
-      setMetalInvestments(prev => prev.filter(inv => inv.id !== id))
-    } else if (type === 'crypto') {
-      setCryptoInvestments(prev => prev.filter(inv => inv.id !== id))
+  const deleteInvestment = async (type: 'currency' | 'metal' | 'crypto', id: string) => {
+    try {
+      if (type === 'currency') {
+        // Supabase'den sil
+        const success = await dataSync.deleteCurrencyInvestment(id)
+        if (success) {
+          setCurrencyInvestments(prev => prev.filter(inv => inv.id !== id))
+          console.log('✅ Currency investment deleted from Supabase')
+        } else {
+          console.log('❌ Failed to delete currency investment from Supabase')
+          setNotification({
+            type: 'error',
+            message: 'Döviz yatırımı silinirken hata oluştu. Lütfen tekrar deneyin.'
+          })
+        }
+      } else if (type === 'metal') {
+        // Metal yatırımları henüz Supabase'e entegre değil, sadece state'den sil
+        setMetalInvestments(prev => prev.filter(inv => inv.id !== id))
+      } else if (type === 'crypto') {
+        // Kripto yatırımları henüz Supabase'e entegre değil, sadece state'den sil
+        setCryptoInvestments(prev => prev.filter(inv => inv.id !== id))
+      }
+    } catch (error) {
+      console.error('❌ Error deleting investment:', error)
+      setNotification({
+        type: 'error',
+        message: 'Yatırım silinirken hata oluştu. Lütfen tekrar deneyin.'
+      })
     }
   }
 

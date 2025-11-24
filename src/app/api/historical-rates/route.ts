@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabase'
 
 interface HistoricalRate {
   date: string
@@ -64,16 +65,161 @@ const formatYearMonthForTCMB = (date: Date): string => {
   return `${year}${month}` // YYYYMM formatı
 }
 
-export async function GET(request: Request) {
+// Supabase'den geçmiş verileri al
+async function getHistoricalFromSupabase(currencyCode?: string, days: number = 30): Promise<HistoricalRate[] | null> {
+  if (!supabaseAdmin) {
+    return null
+  }
+
+  try {
+    // Önce tablonun varlığını kontrol et
+    const { error: tableError } = await supabaseAdmin
+      .from('exchange_rate_history')
+      .select('id')
+      .limit(1)
+
+    if (tableError && tableError.message.includes('does not exist')) {
+      console.warn('exchange_rate_history table does not exist')
+      return null
+    }
+
+    // Önce fonksiyonu dene
+    const { data: functionData, error: functionError } = await supabaseAdmin.rpc('get_exchange_rate_history', {
+      p_currency_code: currencyCode,
+      p_days: days
+    })
+
+    if (!functionError && functionData) {
+      return functionData.map((item: any) => ({
+        date: new Date(item.record_date).toISOString().split('T')[0],
+        code: item.currency_code,
+        name: item.currency_name,
+        buyRate: item.buy_rate,
+        sellRate: item.sell_rate,
+        flag: item.flag
+      }))
+    }
+
+    // Fonksiyon yoksa doğrudan tablodan al
+    console.warn('get_exchange_rate_history function not available, using direct select')
+    
+    let query = supabaseAdmin
+      .from('exchange_rate_history')
+      .select('*')
+      .gte('record_date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+
+    if (currencyCode) {
+      query = query.eq('currency_code', currencyCode)
+    }
+
+    const { data, error } = await query.order('record_date', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching historical data from Supabase:', error)
+      return null
+    }
+
+    if (data && data.length > 0) {
+      return data.map((item: any) => ({
+        date: new Date(item.record_date).toISOString().split('T')[0],
+        code: item.currency_code,
+        name: item.currency_name,
+        buyRate: item.buy_rate,
+        sellRate: item.sell_rate,
+        flag: item.flag
+      }))
+    }
+  } catch (error) {
+    console.error('Error fetching historical data from Supabase:', error)
+  }
+
+  return null
+}
+
+// Supabase'e geçmiş verileri kaydet
+async function saveHistoricalToSupabase(rates: HistoricalRate[], date: string): Promise<boolean> {
+  if (!supabaseAdmin) {
+    console.warn('Supabase admin client not available, skipping historical save')
+    return false
+  }
+
+  try {
+    // Önce tablonun varlığını kontrol et
+    const { error: tableError } = await supabaseAdmin
+      .from('exchange_rate_history')
+      .select('id')
+      .limit(1)
+
+    if (tableError && tableError.message.includes('does not exist')) {
+      console.warn('exchange_rate_history table does not exist, skipping save')
+      return false
+    }
+
+    for (const rate of rates) {
+      const { error } = await supabaseAdmin
+        .from('exchange_rate_history')
+        .upsert({
+          currency_code: rate.code,
+          currency_name: rate.name,
+          buy_rate: rate.buyRate,
+          sell_rate: rate.sellRate,
+          flag: rate.flag,
+          source: 'tcmb',
+          record_date: new Date(date).toISOString()
+        }, {
+          onConflict: 'currency_code,record_date'
+        })
+
+      if (error) {
+        console.error(`Error saving historical ${rate.code} to Supabase:`, error)
+        return false
+      }
+    }
+    return true
+  } catch (error) {
+    console.error('Error saving historical data to Supabase:', error)
+    return false
+  }
+}
+
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const targetDate = searchParams.get('date')
     const currencyCode = searchParams.get('currency')
+    const useCache = searchParams.get('cache') !== 'false'
     
+    // Eğer tarih belirtilmemişse, son günlerin geçmişini getir
     if (!targetDate) {
+      const days = parseInt(searchParams.get('days') || '30')
+      
+      if (useCache) {
+        const historicalData = await getHistoricalFromSupabase(currencyCode, days)
+        if (historicalData && historicalData.length > 0) {
+          return NextResponse.json({
+            success: true,
+            data: historicalData,
+            source: 'supabase',
+            days,
+            currency: currencyCode
+          })
+        } else {
+          // Cache'de veri yoksa boş sonuç dön
+          return NextResponse.json({
+            success: true,
+            data: [],
+            source: 'supabase',
+            days,
+            currency: currencyCode,
+            message: 'Cache\'de veri bulunamadı'
+          })
+        }
+      }
+
       return NextResponse.json({
         success: false,
-        error: 'Tarih parametresi gereklidir (format: YYYY-MM-DD)'
+        error: 'Tarih parametresi gereklidir',
+        message: 'Tarih belirterek TCMB\'den veri alabilirsiniz'
       }, { status: 400 })
     }
 
@@ -89,7 +235,7 @@ export async function GET(request: Request) {
 
     let currentDate = new Date(targetDateObj)
     let attempts = 0
-    const maxAttempts = 7 // En fazla 7 iş günü geri git (isteğe göre)
+    const maxAttempts = 7 // En fazla 7 iş günü geri git
     
     let historicalData: HistoricalRate[] = []
     let usedDate = ''
@@ -119,10 +265,6 @@ export async function GET(request: Request) {
             console.log(`Boş XML: ${tcmbUrl}`)
           } else {
             try {
-              // Node.js'te XML parsing için cheerio veya jsdom kullanabiliriz
-              // Şimdilik basit bir regex ile parse edelim
-              console.log(`📄 XML metni alındı, boyut: ${xmlText.length} karakter`)
-              
               // Currency bloklarını regex ile bul
               const currencyRegex = /<Currency[^>]*Kod="([^"]+)"[^>]*>[\s\S]*?<\/Currency>/g
               const currencyMatches = [...xmlText.matchAll(currencyRegex)]
@@ -134,8 +276,6 @@ export async function GET(request: Request) {
               for (const match of currencyMatches) {
                 const currencyXml = match[0]
                 const code = match[1]
-                
-                console.log(`🔍 Döviz analiz ediliyor: ${code}`)
                 
                 if (code && (!currencyCode || code === currencyCode)) {
                   // Isim bul
@@ -150,21 +290,16 @@ export async function GET(request: Request) {
                   const buyingMatch = currencyXml.match(/<ForexBuying>([^<]*)<\/ForexBuying>/)
                   const buying = parseFloat(buyingMatch ? buyingMatch[1] : '0')
                   
-                  console.log(`💰 ${code} - Alış: ${buying}, Satış: ${selling}`)
-                  
                   // Sadece geçerli kurları ekle
                   if (buying > 0 && selling > 0) {
                     rates.push({
                       date: currentDate.toISOString().split('T')[0],
                       code,
-                      name: name.charAt(0) + name.slice(1).toLowerCase(), // İlk harf büyük, diğerleri küçük
+                      name: name.charAt(0) + name.slice(1).toLowerCase(),
                       buyRate: buying,
                       sellRate: selling,
                       flag: getCurrencyFlag(code)
                     })
-                    console.log(`✅ ${code} eklendi: ${selling} (satış)`)
-                  } else {
-                    console.log(`❌ ${code} geçersiz kur: Alış=${buying}, Satış=${selling}`)
                   }
                 }
               }
@@ -173,9 +308,11 @@ export async function GET(request: Request) {
                 historicalData = rates
                 usedDate = currentDate.toISOString().split('T')[0]
                 isPreviousDay = attempts > 0
+                
+                // Supabase'e kaydet
+                await saveHistoricalToSupabase(rates, usedDate)
+                
                 console.log(`🎉 Kur bulundu: ${tcmbUrl} (${attempts + 1}. deneme) - ${rates.length} döviz`)
-              } else {
-                console.log(`⚠️ Geçerli kur bulunamadı: ${tcmbUrl}`)
               }
             } catch (parseError) {
               console.log(`💥 XML parsing hatası: ${tcmbUrl} - ${parseError}`)
@@ -222,6 +359,7 @@ export async function GET(request: Request) {
       requestedDate: targetDate,
       actualDate: usedDate,
       isPreviousDay,
+      source: 'tcmb',
       message: isPreviousDay 
         ? `Seçilen tarihte kur yok, ${usedDate} tarihinin kuru kullanıldı.`
         : null

@@ -5,11 +5,35 @@ export const dataSync = {
   // Mevcut kullanıcı ID'sini al
   async getCurrentUserId() {
     try {
+      if (!supabase) {
+        console.log('Supabase client not initialized')
+        return null
+      }
+      
+      // First try to get the current session (more reliable than getUser)
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) {
+        console.error('Error getting session:', sessionError)
+        return null
+      }
+      
+      if (session?.user) {
+        console.log('Found user session:', session.user.id)
+        return session.user.id
+      }
+      
+      // Fallback to getUser if getSession doesn't work
       const { data: { user }, error } = await supabase.auth.getUser()
-      if (error || !user) {
+      if (error) {
         console.error('Error getting current user:', error)
         return null
       }
+      if (!user) {
+        console.log('No authenticated user found')
+        return null
+      }
+      
+      console.log('Found user via getUser:', user.id)
       return user.id
     } catch (error) {
       console.error('Error in getCurrentUserId:', error)
@@ -21,7 +45,10 @@ export const dataSync = {
   async getBalances() {
     try {
       const userId = await this.getCurrentUserId()
-      if (!userId) return { cash: 0, bank: 0, savings: 0 }
+      if (!userId) {
+        console.log('No authenticated user found for balances')
+        return { cash: 0, bank: 0, savings: 0 }
+      }
 
       const { data, error } = await supabase
         .from('user_data')
@@ -39,8 +66,20 @@ export const dataSync = {
         return { cash: 0, bank: 0, savings: 0 }
       }
 
-      console.log('Balances retrieved from Supabase:', data?.data)
-      return data?.data || { cash: 0, bank: 0, savings: 0 }
+      // Parse the data and extract only balance values
+      try {
+        const parsedData = JSON.parse(data?.data || '{}')
+        const balances = {
+          cash: parsedData.cash || 0,
+          bank: parsedData.bank || 0,
+          savings: parsedData.savings || 0
+        }
+        console.log('Balances retrieved from Supabase:', balances)
+        return balances
+      } catch (parseError) {
+        console.error('Error parsing balances data:', parseError)
+        return { cash: 0, bank: 0, savings: 0 }
+      }
     } catch (error) {
       console.error('Error in getBalances:', error)
       return { cash: 0, bank: 0, savings: 0 }
@@ -58,16 +97,56 @@ export const dataSync = {
 
       console.log('Updating balances in Supabase:', balances)
 
-      const { error } = await supabase
+      // Get existing accounts data to preserve it
+      const { data: existingAccounts, error: accountsError } = await supabase
         .from('user_data')
-        .upsert({
-          user_id: userId,
-          data_type: 'accounts',
-          data: balances,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id,data_type'
-        })
+        .select('data')
+        .eq('user_id', userId)
+        .eq('data_type', 'accounts')
+        .single()
+
+      let existingData = {}
+      if (!accountsError && existingAccounts) {
+        try {
+          existingData = JSON.parse(existingAccounts.data || '{}')
+        } catch (parseError) {
+          console.error('Error parsing existing accounts data:', parseError)
+        }
+      }
+
+      // Merge existing data with new balances
+      const updatedData = {
+        ...existingData,
+        cash: balances.cash,
+        bank: balances.bank,
+        savings: balances.savings,
+        lastUpdated: new Date().toISOString()
+      }
+
+      let result;
+      if (existingAccounts) {
+        // Update existing record
+        result = await supabase
+          .from('user_data')
+          .update({
+            data: JSON.stringify(updatedData),
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userId)
+          .eq('data_type', 'accounts')
+      } else {
+        // Insert new record
+        result = await supabase
+          .from('user_data')
+          .insert({
+            user_id: userId,
+            data_type: 'accounts',
+            data: JSON.stringify(updatedData),
+            updated_at: new Date().toISOString()
+          })
+      }
+
+      const { error } = result
 
       if (error) {
         console.error('Error updating balances:', error)
@@ -86,7 +165,10 @@ export const dataSync = {
   async getTransactions() {
     try {
       const userId = await this.getCurrentUserId()
-      if (!userId) return []
+      if (!userId) {
+        console.log('No authenticated user found for transactions')
+        return []
+      }
 
       const { data, error } = await supabase
         .from('user_data')
@@ -171,7 +253,10 @@ export const dataSync = {
   async getRecurringTransactions() {
     try {
       const userId = await this.getCurrentUserId()
-      if (!userId) return []
+      if (!userId) {
+        console.log('No authenticated user found for recurring transactions')
+        return []
+      }
 
       const { data, error } = await supabase
         .from('user_data')
@@ -299,8 +384,26 @@ export const dataSync = {
   async getNotes() {
     try {
       const userId = await this.getCurrentUserId()
-      if (!userId) return []
+      if (!userId) {
+        console.log('No authenticated user found for notes')
+        return []
+      }
 
+      // Try server-side API first (more reliable)
+      try {
+        const response = await fetch(`/api/notes?userId=${userId}`)
+        if (response.ok) {
+          const result = await response.json()
+          if (result.success) {
+            console.log('Notes retrieved via API:', result.data?.length || 0)
+            return result.data || []
+          }
+        }
+      } catch (apiError) {
+        console.log('API call failed, falling back to client-side:', apiError)
+      }
+
+      // Fallback to client-side Supabase
       const { data, error } = await supabase
         .from('user_data')
         .select('data')
@@ -317,7 +420,7 @@ export const dataSync = {
         return []
       }
 
-      console.log('Notes retrieved from Supabase:', data?.data?.length || 0)
+      console.log('Notes retrieved from Supabase client:', data?.data?.length || 0)
       return data?.data || []
     } catch (error) {
       console.error('Error in getNotes:', error)
@@ -325,7 +428,242 @@ export const dataSync = {
     }
   },
 
-  // Not ekle
+  // Döviz yatırımı ekle
+  async addCurrencyInvestment(investment: any) {
+    try {
+      const userId = await this.getCurrentUserId()
+      if (!userId) {
+        console.error('No user ID found for adding currency investment')
+        return false
+      }
+
+      console.log('Adding currency investment to Supabase:', investment)
+
+      // Mevcut yatırımları getir
+      const existingInvestments = await this.getCurrencyInvestments()
+      
+      // Yeni yatırımı ekle
+      const updatedInvestments = [investment, ...existingInvestments]
+
+      // Get existing accounts data to preserve it
+      const { data: existingAccounts, error: accountsError } = await supabase
+        .from('user_data')
+        .select('data')
+        .eq('user_id', userId)
+        .eq('data_type', 'accounts')
+        .single()
+
+      let existingData = {}
+      if (!accountsError && existingAccounts) {
+        try {
+          existingData = JSON.parse(existingAccounts.data || '{}')
+        } catch (parseError) {
+          console.error('Error parsing existing accounts data:', parseError)
+        }
+      }
+
+      // Merge existing data with new currency investments
+      const updatedData = {
+        ...existingData,
+        currencyInvestments: updatedInvestments,
+        lastUpdated: new Date().toISOString()
+      }
+
+      // Supabase'e kaydet - use 'accounts' data type instead of 'currency_investments'
+      let result;
+      if (existingAccounts) {
+        // Update existing record
+        result = await supabase
+          .from('user_data')
+          .update({
+            data: JSON.stringify(updatedData),
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userId)
+          .eq('data_type', 'accounts')
+          .select()
+      } else {
+        // Insert new record
+        result = await supabase
+          .from('user_data')
+          .insert({
+            user_id: userId,
+            data_type: 'accounts',
+            data: JSON.stringify(updatedData),
+            updated_at: new Date().toISOString()
+          })
+          .select()
+      }
+
+      const { data, error } = result
+
+      if (error) {
+        console.error('Error adding currency investment:', error)
+        return false
+      }
+
+      console.log('Currency investment successfully saved to Supabase')
+      return true
+    } catch (error) {
+      console.error('Error in addCurrencyInvestment:', error)
+      return false
+    }
+  },
+
+  // Döviz yatırımlarını getir
+  async getCurrencyInvestments() {
+    try {
+      const userId = await this.getCurrentUserId()
+      if (!userId) {
+        console.log('No authenticated user found for currency investments')
+        return []
+      }
+
+      // Try server-side API first (more reliable)
+      try {
+        const response = await fetch(`/api/currency-investments?userId=${userId}`)
+        if (response.ok) {
+          const result = await response.json()
+          if (result.success) {
+            console.log('Currency investments retrieved via API:', result.data?.length || 0)
+            return result.data || []
+          }
+        }
+      } catch (apiError) {
+        console.log('API call failed, falling back to client-side:', apiError)
+      }
+
+      // Fallback to client-side Supabase - read from 'accounts' data type
+      const { data, error } = await supabase
+        .from('user_data')
+        .select('data')
+        .eq('user_id', userId)
+        .eq('data_type', 'accounts')
+        .single()
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          console.log('No currency investments found for user')
+          return []
+        }
+        console.error('Error getting currency investments:', error)
+        return []
+      }
+
+      // Parse the data and extract currency investments
+      try {
+        const parsedData = JSON.parse(data?.data || '{}')
+        const currencyInvestments = parsedData.currencyInvestments || []
+        console.log('Currency investments retrieved from Supabase client:', currencyInvestments.length)
+        return currencyInvestments
+      } catch (parseError) {
+        console.error('Error parsing currency investments data:', parseError)
+        return []
+      }
+    } catch (error) {
+      console.error('Error in getCurrencyInvestments:', error)
+      return []
+    }
+  },
+
+  // Döviz yatırımı sil
+  async deleteCurrencyInvestment(investmentId: string) {
+    try {
+      const userId = await this.getCurrentUserId()
+      if (!userId) {
+        console.error('No user ID found for deleting currency investment')
+        return false
+      }
+
+      console.log('Deleting currency investment:', investmentId)
+
+      // Try server-side API first (more reliable)
+      try {
+        const response = await fetch(`/api/currency-investments?userId=${userId}&investmentId=${investmentId}`, {
+          method: 'DELETE'
+        })
+        if (response.ok) {
+          const result = await response.json()
+          if (result.success) {
+            console.log('Currency investment successfully deleted via API')
+            return true
+          }
+        }
+      } catch (apiError) {
+        console.log('API call failed, falling back to client-side:', apiError)
+      }
+
+      // Fallback to client-side Supabase
+      // Mevcut yatırımları getir
+      const existingInvestments = await this.getCurrencyInvestments()
+      
+      // Yatırımı sil
+      const updatedInvestments = existingInvestments.filter(inv => inv.id !== investmentId)
+
+      // Get existing accounts data to preserve it
+      const { data: existingAccounts, error: accountsError } = await supabase
+        .from('user_data')
+        .select('data')
+        .eq('user_id', userId)
+        .eq('data_type', 'accounts')
+        .single()
+
+      let existingData = {}
+      if (!accountsError && existingAccounts) {
+        try {
+          existingData = JSON.parse(existingAccounts.data || '{}')
+        } catch (parseError) {
+          console.error('Error parsing existing accounts data:', parseError)
+        }
+      }
+
+      // Merge existing data with updated currency investments
+      const updatedData = {
+        ...existingData,
+        currencyInvestments: updatedInvestments,
+        lastUpdated: new Date().toISOString()
+      }
+
+      // Update database using proper update/insert logic
+      let result;
+      if (existingAccounts) {
+        // Update existing record
+        result = await supabase
+          .from('user_data')
+          .update({
+            data: JSON.stringify(updatedData),
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userId)
+          .eq('data_type', 'accounts')
+          .select()
+      } else {
+        // Insert new record
+        result = await supabase
+          .from('user_data')
+          .insert({
+            user_id: userId,
+            data_type: 'accounts',
+            data: JSON.stringify(updatedData),
+            updated_at: new Date().toISOString()
+          })
+          .select()
+      }
+
+      const { data, error } = result
+
+      if (error) {
+        console.error('Error deleting currency investment:', error)
+        return false
+      }
+
+      console.log('Currency investment successfully deleted from Supabase')
+      return true
+    } catch (error) {
+      console.error('Error in deleteCurrencyInvestment:', error)
+      return false
+    }
+  },
   async addNote(note: any) {
     try {
       const userId = await this.getCurrentUserId()

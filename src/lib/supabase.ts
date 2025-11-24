@@ -102,6 +102,137 @@ export type Database = {
           updated_at?: string
         }
       }
+      exchange_rates: {
+        Row: {
+          id: string
+          currency_code: string
+          currency_name: string
+          buy_rate: number
+          sell_rate: number
+          change_rate: number | null
+          change_percent: number | null
+          flag: string
+          source: string
+          last_update: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          currency_code: string
+          currency_name: string
+          buy_rate: number
+          sell_rate: number
+          change_rate?: number | null
+          change_percent?: number | null
+          flag: string
+          source?: string
+          last_update?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          currency_code?: string
+          currency_name?: string
+          buy_rate?: number
+          sell_rate?: number
+          change_rate?: number | null
+          change_percent?: number | null
+          flag?: string
+          source?: string
+          last_update?: string
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      exchange_rate_history: {
+        Row: {
+          id: string
+          currency_code: string
+          currency_name: string
+          buy_rate: number
+          sell_rate: number
+          change_rate: number | null
+          change_percent: number | null
+          flag: string
+          source: string
+          record_date: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          currency_code: string
+          currency_name: string
+          buy_rate: number
+          sell_rate: number
+          change_rate?: number | null
+          change_percent?: number | null
+          flag: string
+          source?: string
+          record_date?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          currency_code?: string
+          currency_name?: string
+          buy_rate?: number
+          sell_rate?: number
+          change_rate?: number | null
+          change_percent?: number | null
+          flag?: string
+          source?: string
+          record_date?: string
+          created_at?: string
+        }
+      }
+    }
+    Functions: {
+      update_exchange_rate: {
+        Args: {
+          p_currency_code: string
+          p_currency_name: string
+          p_buy_rate: number
+          p_sell_rate: number
+          p_change_rate?: number | null
+          p_change_percent?: number | null
+          p_flag: string
+          p_source?: string
+        }
+        Returns: boolean
+      }
+      get_exchange_rates: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          currency_code: string
+          currency_name: string
+          buy_rate: number
+          sell_rate: number
+          change_rate: number | null
+          change_percent: number | null
+          flag: string
+          source: string
+          last_update: string
+        }[]
+      }
+      get_exchange_rate_history: {
+        Args: {
+          p_currency_code?: string | null
+          p_days?: number
+        }
+        Returns: {
+          currency_code: string
+          currency_name: string
+          buy_rate: number
+          sell_rate: number
+          change_rate: number | null
+          change_percent: number | null
+          flag: string
+          source: string
+          record_date: string
+        }[]
+      }
     }
   }
 }

@@ -40,7 +40,16 @@ export default function CurrencyRatesWidget() {
       setLoading(true)
       setError('')
       
-      const response = await fetch('/api/exchange-rates')
+      // Cache-busting timestamp ekle
+      const timestamp = new Date().getTime()
+      const response = await fetch(`/api/exchange-rates?refresh=true&t=${timestamp}`, {
+        cache: 'no-cache', // Browser cache'ini devre dışı bırak
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      })
       const data: CurrencyResponse = await response.json()
       
       if (data.success && data.data) {
@@ -62,12 +71,50 @@ export default function CurrencyRatesWidget() {
   }
 
   useEffect(() => {
-    fetchRates()
+    // İlk yüklemede normal fetch (cache'den alabilir)
+    const initialFetch = async () => {
+      try {
+        setLoading(true)
+        setError('')
+        
+        // Cache-busting timestamp ekle
+        const timestamp = new Date().getTime()
+        const response = await fetch(`/api/exchange-rates?t=${timestamp}`, {
+          cache: 'no-cache', // Browser cache'ini devre dışı bırak
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        })
+        const data: CurrencyResponse = await response.json()
+        
+        if (data.success && data.data) {
+          setRates(data.data)
+          setLastUpdate(data.lastUpdate || new Date().toLocaleString('tr-TR'))
+          
+          if (data.message) {
+            setError(data.message)
+          }
+        } else {
+          throw new Error('Döviz kurları alınamadı')
+        }
+      } catch (err) {
+        setError('Döviz kurları yüklenemedi')
+        console.error('Döviz kuru hatası:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    initialFetch()
     
     // Her 10 dakikada bir güncelle
-    const interval = setInterval(fetchRates, 10 * 60 * 1000)
+    const interval = fetchRates
     
-    return () => clearInterval(interval)
+    const intervalId = setInterval(interval, 10 * 60 * 1000)
+    
+    return () => clearInterval(intervalId)
   }, [])
 
   // Ana gösterge için USD, EUR, GBP'yi al
