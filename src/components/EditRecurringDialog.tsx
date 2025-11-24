@@ -15,9 +15,11 @@ interface RecurringTransaction {
   category: string
   description: string
   account: 'cash' | 'bank' | 'savings'
-  frequency: 'monthly' | 'yearly'
-  dayOfMonth?: number
-  monthOfYear?: number
+  frequency: 'weekly' | 'monthly' | 'yearly'
+  dayOfWeek?: number  // Haftalık için (1-7, 1=Pazartesi)
+  dayOfMonth?: number  // Aylık için (1-31)
+  weekOfMonth?: number  // Aylık için (1-5) - ayın hangi haftası
+  monthOfYear?: number  // Yıllık için (1-12)
   startDate: string
   endDate?: string
   isActive: boolean
@@ -157,34 +159,87 @@ export default function EditRecurringDialog({
               </Label>
               <Select
                 value={formData.frequency}
-                onValueChange={(value: 'monthly' | 'yearly') => handleChange('frequency', value)}
+                onValueChange={(value: 'weekly' | 'monthly' | 'yearly') => handleChange('frequency', value)}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="weekly">Haftalık</SelectItem>
                   <SelectItem value="monthly">{t('app.monthly')}</SelectItem>
                   <SelectItem value="yearly">{t('app.yearly')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Gün */}
-            <div>
-              <Label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                {formData.frequency === 'monthly' ? t('app.dayOfMonth') : t('app.dayOfMonth')} *
-              </Label>
-              <Input
-                type="number"
-                min="1"
-                max={formData.frequency === 'monthly' ? 31 : 31}
-                value={formData.dayOfMonth}
-                onChange={(e) => handleChange('dayOfMonth', parseInt(e.target.value) || 1)}
-                required
-                className="w-full"
-                placeholder={formData.frequency === 'monthly' ? '1-31 arası gün' : '1-31 arası gün'}
-              />
-            </div>
+            {/* Gün - Haftalık için */}
+            {formData.frequency === 'weekly' && (
+              <div>
+                <Label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Haftanın Günü *
+                </Label>
+                <Select
+                  value={formData.dayOfWeek?.toString()}
+                  onValueChange={(value: string) => handleChange('dayOfWeek', parseInt(value) || 1)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Pazartesi</SelectItem>
+                    <SelectItem value="2">Pazartesi</SelectItem>
+                    <SelectItem value="3">Salı</SelectItem>
+                    <SelectItem value="4">Çarşamba</SelectItem>
+                    <SelectItem value="5">Perşembe</SelectItem>
+                    <SelectItem value="6">Cuma</SelectItem>
+                    <SelectItem value="7">Cumartesi</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Gün - Aylık için */}
+            {formData.frequency === 'monthly' && (
+              <div>
+                <Label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  {t('app.dayOfMonth')} *
+                </Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={formData.dayOfMonth}
+                  onChange={(e) => handleChange('dayOfMonth', parseInt(e.target.value) || 1)}
+                  required
+                  className="w-full"
+                  placeholder="1-31 arası gün"
+                />
+              </div>
+            )}
+
+            {/* Hafta - Aylık için */}
+            {formData.frequency === 'monthly' && (
+              <div>
+                <Label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Ayın Haftası *
+                </Label>
+                <Select
+                  value={formData.weekOfMonth?.toString()}
+                  onValueChange={(value: string) => handleChange('weekOfMonth', parseInt(value) || 1)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1. Hafta</SelectItem>
+                    <SelectItem value="2">2. Hafta</SelectItem>
+                    <SelectItem value="3">3. Hafta</SelectItem>
+                    <SelectItem value="4">4. Hafta</SelectItem>
+                    <SelectItem value="5">5. Hafta</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Yıllık için ay seçimi */}
             {formData.frequency === 'yearly' && (

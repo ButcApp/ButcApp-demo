@@ -11,8 +11,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Calendar, DollarSign, TrendingUp, TrendingDown, Plus, Wallet, PiggyBank, Building, Filter, Repeat, Settings, BarChart3, Target, AlertCircle, ArrowRightLeft, Clock, Timer, Shield, Smartphone, FileText, Download, Upload, Menu, X, ChevronRight, CheckCircle, LineChart as LineChartIcon, Mail, Send, CheckCircle2 } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { LanguageToggle } from '@/components/language-toggle'
+import { UserAuthButton } from '@/components/auth/UserAuthButton'
+import { useLanguage } from '@/contexts/LanguageContext'
+import { useAuth } from '@/contexts/AuthContext'
+import { dataSync } from '@/lib/data-sync'
+import { RecurringTransactionsList } from '@/components/RecurringTransactionsList'
 import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar } from 'recharts'
 import Link from 'next/link'
+import EditRecurringDialog from '@/components/EditRecurringDialog'
 
 interface Transaction {
   id: string
@@ -26,8 +33,6 @@ interface Transaction {
   recurringId?: string
   transferFrom?: 'cash' | 'bank' | 'savings'
   transferTo?: 'cash' | 'bank' | 'savings'
-  person?: string  // Borçlu kişi/kurum
-  institution?: string  // Borçlu kurum
 }
 
 interface RecurringTransaction {
@@ -37,8 +42,10 @@ interface RecurringTransaction {
   category: string
   description: string
   account: 'cash' | 'bank' | 'savings'
-  frequency: 'monthly' | 'yearly'
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'quarterly' | 'biannual'
   dayOfMonth?: number
+  dayOfWeek?: number // Haftanın günü (1-7, Pazartesi=1)
+  weekOfMonth?: number // Ayın kaçıncı haftası (1-5)
   monthOfYear?: number
   startDate: string
   endDate?: string
@@ -51,20 +58,42 @@ interface AccountBalances {
   savings: number
 }
 
+interface Note {
+  id: string
+  content: string
+  date: string
+  createdAt: string
+  tags?: string[]
+}
+
 export default function CepFinansApp() {
+  const { t } = useLanguage()
+  const { user } = useAuth()
   const [balances, setBalances] = useState<AccountBalances>({ cash: 0, bank: 0, savings: 0 })
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [recurringTransactions, setRecurringTransactions] = useState<RecurringTransaction[]>([])
   const [isFirstTime, setIsFirstTime] = useState(true)
+  const [loading, setLoading] = useState(true)
   const [showAddTransaction, setShowAddTransaction] = useState(false)
   const [showRecurringDialog, setShowRecurringDialog] = useState(false)
-  const [showDebtDialog, setShowDebtDialog] = useState(false)
-  const [showTransferDialog, setShowTransferDialog] = useState(false)
-  const [showSettingsDialog, setShowSettingsDialog] = useState(false)
-  const [showStatsDialog, setShowStatsDialog] = useState(false)
-  const [selectedDate, setSelectedDate] = useState<string>('all')
+  const [recurringFrequency, setRecurringFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly')
+  const [showTimeRangeDialog, setShowTimeRangeDialog] = useState(false)
+  const [timeRange, setTimeRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month')
   const [showContactDialog, setShowContactDialog] = useState(false)
-  const [showDebtSection, setShowDebtSection] = useState(false) // Borç takibi açılır/kapanır durumu
+  const [showTransferDialog, setShowTransferDialog] = useState(false)
+  const [showStatsDialog, setShowStatsDialog] = useState(false)
+  const [showEditRecurringDialog, setShowEditRecurringDialog] = useState(false)
+  const [editingRecurring, setEditingRecurring] = useState<RecurringTransaction | null>(null)
+  const [selectedDate, setSelectedDate] = useState<string>('all')
+  const [showNotesSection, setShowNotesSection] = useState(false)
+  const [showNoteDialog, setShowNoteDialog] = useState(false)
+  const [showAllNotesDialog, setShowAllNotesDialog] = useState(false)
+  const [noteFilter, setNoteFilter] = useState<'all' | 'today' | 'week' | 'month'>('all')
+  
+  // Notlar state
+  const [notes, setNotes] = useState<Note[]>([])
+  const [noteContent, setNoteContent] = useState('')
+  const [noteTags, setNoteTags] = useState('')
   
   // İletişim form state
   const [formData, setFormData] = useState({
@@ -72,59 +101,58 @@ export default function CepFinansApp() {
     email: '',
     subject: '',
     message: '',
-    type: 'Öneri'
+    type: t('contact.suggestion')
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle')
   
-  // Borç form state
-  const [debtFormData, setDebtFormData] = useState({
-    person: '',
-    institution: '',
-    amount: '',
-    description: '',
-    account: 'cash' as 'cash' | 'bank' | 'savings'
-  })
-  
 
-  // localStorage'dan verileri yükle
+  // Verileri Supabase'den yükle
   useEffect(() => {
-    const savedBalances = localStorage.getItem('cepfinans-balances')
-    const savedTransactions = localStorage.getItem('cepfinans-transactions')
-    const savedRecurring = localStorage.getItem('cepfinans-recurring')
-    
-    if (savedBalances) {
-      setBalances(JSON.parse(savedBalances))
-      setIsFirstTime(false)
+    const loadData = async () => {
+      if (!user) {
+        setLoading(false)
+        return
+      }
+
+      try {
+        setLoading(true)
+        
+        // Paralel olarak tüm verileri yükle
+        const [balancesData, transactionsData, recurringData, notesData] = await Promise.all([
+          dataSync.getBalances(),
+          dataSync.getTransactions(),
+          dataSync.getRecurringTransactions(),
+          dataSync.getNotes()
+        ])
+
+        if (balancesData) {
+          setBalances(balancesData)
+          setIsFirstTime(false)
+        }
+        
+        if (transactionsData) {
+          setTransactions(transactionsData)
+        }
+
+        if (recurringData) {
+          setRecurringTransactions(recurringData)
+        }
+
+        if (notesData) {
+          setNotes(notesData)
+        }
+      } catch (error) {
+        console.error('Veriler yüklenirken hata:', error)
+      } finally {
+        setLoading(false)
+      }
     }
-    
-    if (savedTransactions) {
-      setTransactions(JSON.parse(savedTransactions))
-    }
 
-    if (savedRecurring) {
-      setRecurringTransactions(JSON.parse(savedRecurring))
-    }
-  }, [])
+    loadData()
+  }, [user])
 
-  // Balances kaydet
-  useEffect(() => {
-    if (!isFirstTime) {
-      localStorage.setItem('cepfinans-balances', JSON.stringify(balances))
-    }
-  }, [balances, isFirstTime])
-
-  // Transactions kaydet
-  useEffect(() => {
-    localStorage.setItem('cepfinans-transactions', JSON.stringify(transactions))
-  }, [transactions])
-
-  // Recurring transactions kaydet
-  useEffect(() => {
-    localStorage.setItem('cepfinans-recurring', JSON.stringify(recurringTransactions))
-  }, [recurringTransactions])
-
-  // Aylık otomatik işlemleri kontrol et
+  // {t('app.monthlyAutoTransactions')}
   useEffect(() => {
     checkAndApplyRecurringTransactions()
   }, [recurringTransactions])
@@ -134,15 +162,27 @@ export default function CepFinansApp() {
     const currentMonth = today.getMonth()
     const currentYear = today.getFullYear()
     const currentDay = today.getDate()
+    const currentDayOfWeek = today.getDay() + 1 // Pazartesi=1, Pazar=7
 
     recurringTransactions.forEach(recurring => {
       if (!recurring.isActive) return
 
-      const shouldApply = 
-        recurring.frequency === 'monthly' && recurring.dayOfMonth === currentDay ||
-        recurring.frequency === 'yearly' && 
-        recurring.monthOfYear === currentMonth + 1 && 
-        recurring.dayOfMonth === currentDay
+      let shouldApply = false
+      
+      switch (recurring.frequency) {
+        case 'daily':
+          shouldApply = true // Her gün uygula
+          break
+        case 'weekly':
+          shouldApply = recurring.dayOfWeek === currentDayOfWeek
+          break
+        case 'monthly':
+          shouldApply = recurring.dayOfMonth === currentDay
+          break
+        case 'yearly':
+          shouldApply = recurring.monthOfYear === currentMonth + 1 && recurring.dayOfMonth === currentDay
+          break
+      }
 
       if (shouldApply) {
         const todayStr = today.toISOString().split('T')[0]
@@ -167,39 +207,106 @@ export default function CepFinansApp() {
     })
   }
 
-  const handleInitialSetup = (newBalances: AccountBalances) => {
+  const handleInitialSetup = async (newBalances: AccountBalances) => {
     setBalances(newBalances)
     setIsFirstTime(false)
+    
+    // Bakiyeleri Supabase'e kaydet (await ekle)
+    try {
+      const balanceUpdated = await dataSync.updateBalances(newBalances)
+      if (!balanceUpdated) {
+        console.error('Bakiyeler kaydedilemedi, state geri alınıyor')
+        setBalances({ cash: 0, bank: 0, savings: 0 })
+        setIsFirstTime(true)
+        alert('Bakiyeler kaydedilemedi. Lütfen tekrar deneyin.')
+      }
+    } catch (error) {
+      console.error('Bakiyeler kaydedilirken hata:', error)
+      setBalances({ cash: 0, bank: 0, savings: 0 })
+      setIsFirstTime(true)
+      alert('Bakiyeler kaydedilemedi. Lütfen tekrar deneyin.')
+    }
   }
 
-  const addTransaction = (transaction: Omit<Transaction, 'id'>) => {
+  const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
     const newTransaction: Transaction = {
       ...transaction,
       id: Date.now().toString()
     }
     
+    console.log('🔄 addTransaction başlatılıyor:', newTransaction)
+    console.log('📊 Mevcut bakiyeler:', balances)
+    
+    // Önce state'i güncelle
     setTransactions(prev => [newTransaction, ...prev])
+    
+    // Supabase'e kaydet
+    try {
+      console.log('💾 Supabase\'e transaction kaydediliyor...')
+      const transactionAdded = await dataSync.addTransaction(newTransaction)
+      console.log('✅ Transaction Supabase\'e kaydedildi:', transactionAdded)
+      
+      if (!transactionAdded) {
+        console.error('❌ Transaction kaydedilemedi, state geri alınıyor')
+        setTransactions(prev => prev.filter(t => t.id !== newTransaction.id))
+        alert('İşlem kaydedilemedi. Lütfen tekrar deneyin.')
+        return
+      }
+    } catch (error) {
+      console.error('❌ Transaction kaydedilirken hata:', error)
+      // Hata durumunda state'i geri al
+      setTransactions(prev => prev.filter(t => t.id !== newTransaction.id))
+      alert('İşlem kaydedilemedi. Lütfen tekrar deneyin.')
+      return
+    }
+    
+    // Bakiyeleri güncelleme kısmı
+    console.log('💰 Bakiyeler güncelleniyor...')
     
     // Transfer işlemi ise bakiyeleri farklı güncelle
     if (transaction.type === 'transfer' && transaction.transferFrom && transaction.transferTo) {
-      setBalances(prev => {
-        const updated = { ...prev }
-        updated[transaction.transferFrom!] -= transaction.amount
-        updated[transaction.transferTo!] += transaction.amount
-        return updated
-      })
+      console.log('📤 Transfer işlemi tespit edildi')
+      const newBalances = { ...balances }
+      newBalances[transaction.transferFrom!] -= transaction.amount
+      newBalances[transaction.transferTo!] += transaction.amount
+      console.log('💰 Transfer sonrası bakiyeler:', newBalances)
+      setBalances(newBalances)
+      
+      // Bakiyeleri Supabase'e kaydet (await ekle)
+      console.log('💾 Transfer bakiyeleri Supabase\'e kaydediliyor...')
+      const balanceUpdated = await dataSync.updateBalances(newBalances)
+      console.log('✅ Transfer bakiyeleri Supabase\'e güncellendi:', balanceUpdated)
+      if (!balanceUpdated) {
+        console.error('❌ Bakiyeler güncellenemedi, state geri alınıyor')
+        setBalances(balances) // Orijinal bakiyeleri geri al
+        alert('Bakiyeler güncellenemedi. Lütfen tekrar deneyin.')
+      }
     } else {
+      console.log('📤 Normal gelir/gider işlemi tespit edildi')
       // Normal gelir/gider işlemi
-      setBalances(prev => {
-        const updated = { ...prev }
-        if (transaction.type === 'income') {
-          updated[transaction.account] += transaction.amount
-        } else if (transaction.type === 'expense') {
-          updated[transaction.account] -= transaction.amount
-        }
-        return updated
-      })
+      const newBalances = { ...balances }
+      if (transaction.type === 'income') {
+        newBalances[transaction.account] += transaction.amount
+        console.log(`💰 Gelir eklendi: +${transaction.amount} -> ${transaction.account}`)
+      } else if (transaction.type === 'expense') {
+        newBalances[transaction.account] -= transaction.amount
+        console.log(`💰 Gider eklendi: -${transaction.amount} -> ${transaction.account}`)
+      }
+      console.log('💰 İşlem sonrası bakiyeler:', newBalances)
+      setBalances(newBalances)
+      
+      // Bakiyeleri Supabase'e kaydet (await ekle)
+      console.log('💾 Normal bakiyeleri Supabase\'e kaydediliyor...')
+      const balanceUpdated = await dataSync.updateBalances(newBalances)
+      console.log('✅ Normal bakiyeler Supabase\'e güncellendi:', balanceUpdated)
+      if (!balanceUpdated) {
+        console.error('❌ Bakiyeler güncellenemedi, state geri alınıyor')
+        setBalances(balances) // Orijinal bakiyeleri geri al
+        alert('Bakiyeler güncellenemedi. Lütfen tekrar deneyin.')
+      }
     }
+    
+    console.log('✅ addTransaction tamamlandı')
   }
 
   const addTransfer = (transfer: { from: 'cash' | 'bank' | 'savings', to: 'cash' | 'bank' | 'savings', amount: number, description: string }) => {
@@ -251,115 +358,65 @@ export default function CepFinansApp() {
       .sort((a, b) => a.daysUntil - b.daysUntil)
   }
 
-  const addRecurringTransaction = (recurring: Omit<RecurringTransaction, 'id'>) => {
+  const addRecurringTransaction = async (recurring: Omit<RecurringTransaction, 'id'>) => {
     const newRecurring: RecurringTransaction = {
       ...recurring,
       id: Date.now().toString()
     }
+    
+    // Önce state'i güncelle
     setRecurringTransactions(prev => [...prev, newRecurring])
-  }
-
-  const backupData = () => {
-    const data = {
-      balances,
-      transactions,
-      recurringTransactions,
-      exportDate: new Date().toISOString()
-    }
     
-    const dataStr = JSON.stringify(data, null, 2)
-    const dataBlob = new Blob([dataStr], { type: 'application/json' })
-    const url = URL.createObjectURL(dataBlob)
-    
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `cepfinans-backup-${new Date().toISOString().split('T')[0]}.json`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-  }
-
-  const restoreData = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target?.result as string)
-        
-        if (data.balances) {
-          setBalances(data.balances)
-          localStorage.setItem('cepfinans-balances', JSON.stringify(data.balances))
-        }
-        
-        if (data.transactions) {
-          setTransactions(data.transactions)
-          localStorage.setItem('cepfinans-transactions', JSON.stringify(data.transactions))
-        }
-        
-        if (data.recurringTransactions) {
-          setRecurringTransactions(data.recurringTransactions)
-          localStorage.setItem('cepfinans-recurring', JSON.stringify(data.recurringTransactions))
-        }
-        
-        setIsFirstTime(false)
-        alert('Veriler başarıyla geri yüklendi!')
-      } catch (error) {
-        alert('Yedek dosyası okunamadı. Lütfen dosyanın doğru olduğundan emin olun.')
+    // Supabase'e kaydet (await ekle)
+    try {
+      const recurringUpdated = await dataSync.addRecurringTransaction(newRecurring)
+      if (!recurringUpdated) {
+        console.error('Recurring transaction kaydedilemedi, state geri alınıyor')
+        setRecurringTransactions(prev => prev.filter(r => r.id !== newRecurring.id))
+        alert('Tekrarlayan işlem kaydedilemedi. Lütfen tekrar deneyin.')
       }
+    } catch (error) {
+      console.error('Recurring transaction kaydedilirken hata:', error)
+      // Hata durumunda state'i geri al
+      setRecurringTransactions(prev => prev.filter(r => r.id !== newRecurring.id))
+      alert('Tekrarlayan işlem kaydedilemedi. Lütfen tekrar deneyin.')
     }
-    reader.readAsText(file)
+  }
+
+  const handleEditRecurring = (recurring: RecurringTransaction) => {
+    setEditingRecurring(recurring)
+    setShowEditRecurringDialog(true)
+  }
+
+  const updateRecurringTransaction = async (updatedRecurring: RecurringTransaction) => {
+    // Önce state'i güncelle
+    setRecurringTransactions(prev => 
+      prev.map(r => 
+        r.id === updatedRecurring.id ? updatedRecurring : r
+      )
+    )
+    
+    // Supabase'e güncelle (await ekle)
+    try {
+      const recurringUpdated = await dataSync.updateRecurringTransaction(updatedRecurring)
+      if (!recurringUpdated) {
+        console.error('Recurring transaction güncellenemedi, state geri alınıyor')
+        // Orijinal veriyi geri almak zorundayız ama bu karmaşık
+        alert('Tekrarlayan işlem güncellenemedi. Lütfen tekrar deneyin.')
+        return
+      }
+      
+      setShowEditRecurringDialog(false)
+      setEditingRecurring(null)
+    } catch (error) {
+      console.error('Recurring transaction güncellenirken hata:', error)
+      alert('Tekrarlayan işlem güncellenemedi. Lütfen tekrar deneyin.')
+    }
   }
 
   const totalBalance = balances.cash + balances.bank + balances.savings
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
-  
-  // Borç ve Taksit Hesaplama
-  const debtTransactions = transactions.filter(t => t.category === 'Borç' || t.category === 'Taksit')
-  const totalDebt = debtTransactions.reduce((sum, t) => sum + t.amount, 0)
-  const paidDebt = debtTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
-  const remainingDebt = totalDebt - paidDebt
-  
-  // Borçları kişi/kurum bazında grupla
-  const debtsByPerson = debtTransactions.reduce((acc, transaction) => {
-    const key = transaction.person || transaction.institution || 'Bilinmeyen'
-    if (!acc[key]) {
-      acc[key] = {
-        person: transaction.person || '',
-        institution: transaction.institution || '',
-        totalDebt: 0,
-        paidDebt: 0,
-        remainingDebt: 0,
-        transactions: []
-      }
-    }
-    
-    if (transaction.type === 'expense') {
-      acc[key].totalDebt += transaction.amount
-      acc[key].remainingDebt += transaction.amount
-    } else if (transaction.type === 'income') {
-      acc[key].paidDebt += transaction.amount
-      acc[key].remainingDebt -= transaction.amount
-    }
-    
-    acc[key].transactions.push(transaction)
-    return acc
-  }, {} as Record<string, {
-    person: string
-    institution: string
-    totalDebt: number
-    paidDebt: number
-    remainingDebt: number
-    transactions: Transaction[]
-  }>)
-
-  // Sadece kalan borcu olan kişileri filtrele
-  const activeDebtsByPerson = Object.fromEntries(
-    Object.entries(debtsByPerson).filter(([key, debtData]) => debtData.remainingDebt > 0)
-  )
   
   const monthlyIncome = recurringTransactions
     .filter(r => r.type === 'income' && r.isActive)
@@ -414,7 +471,7 @@ export default function CepFinansApp() {
           form.reset()
         }, 2000)
       } else {
-        throw new Error('Form gönderilemedi. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.')
+        throw new Error(t('contact.errorMessage'))
       }
       
     } catch (error) {
@@ -426,119 +483,92 @@ export default function CepFinansApp() {
     }
   }
 
-  // Borç form verilerini güncelle
-  const handleDebtInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target
-    setDebtFormData(prev => ({
-      ...prev,
-      [name]: value
-    }))
-  }
-
-  // Borç ekleme fonksiyonu
-  const addDebt = () => {
-    if (!debtFormData.person || !debtFormData.amount || parseFloat(debtFormData.amount) <= 0) {
-      alert('Lütfen kişi/kurum ve borç tutarı girin!')
+  // Not fonksiyonları
+  const addNote = async () => {
+    if (!noteContent.trim()) {
+      alert('Lütfen bir not içeriği girin!')
       return
     }
 
-    const newTransaction: Transaction = {
+    const newNote: Note = {
       id: Date.now().toString(),
-      type: 'expense',
-      amount: parseFloat(debtFormData.amount),
-      category: 'Borç',
-      description: debtFormData.description || `${debtFormData.person || debtFormData.institution} borcu`,
-      account: debtFormData.account,
-      date: new Date().toISOString(),
-      person: debtFormData.person || debtFormData.institution,
-      institution: debtFormData.institution || ''
+      content: noteContent.trim(),
+      date: new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
+      tags: noteTags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
     }
-    
-    setTransactions(prev => [newTransaction, ...prev])
-    
-    // Bakiyeyi güncelle
-    setBalances(prev => {
-      const updated = { ...prev }
-      updated[debtFormData.account] -= parseFloat(debtFormData.amount)
-      return updated
-    })
 
-    // Formu sıfırla
-    setDebtFormData({
-      person: '',
-      institution: '',
-      amount: '',
-      description: '',
-      account: 'cash'
-    })
+    // Önce state'i güncelle
+    setNotes(prev => [newNote, ...prev])
     
-    // Dialog'u kapat
-    setShowDebtDialog(false)
+    // Supabase'e kaydet (await ekle)
+    try {
+      const noteAdded = await dataSync.addNote(newNote)
+      if (!noteAdded) {
+        console.error('Not kaydedilemedi, state geri alınıyor')
+        setNotes(prev => prev.filter(note => note.id !== newNote.id))
+        alert('Not kaydedilemedi. Lütfen tekrar deneyin.')
+        return
+      }
+      
+      setNoteContent('')
+      setNoteTags('')
+      setShowNoteDialog(false)
+    } catch (error) {
+      console.error('Not kaydedilirken hata:', error)
+      // Hata durumunda state'i geri al
+      setNotes(prev => prev.filter(note => note.id !== newNote.id))
+      alert('Not kaydedilemedi. Lütfen tekrar deneyin.')
+    }
   }
 
-  // Borç ödeme fonksiyonu
-  const payDebt = (personName: string, amount: number) => {
-    console.log('Borç ödeme fonksiyonu çağrıldı:', { personName, amount });
-    
-    if (amount <= 0) {
-      alert('Ödenecek borç tutarı 0 veya negatif olamaz!');
-      return;
+  const deleteNote = async (noteId: string) => {
+    if (confirm('Bu notu silmek istediğinizden emin misiniz?')) {
+      // Supabase'den sil (await ekle)
+      try {
+        const noteDeleted = await dataSync.deleteNote(noteId)
+        if (!noteDeleted) {
+          console.error('Not silinemedi')
+          alert('Not silinemedi. Lütfen tekrar deneyin.')
+          return
+        }
+        
+        // State'i güncelle (backend'den silindiği için)
+        setNotes(prev => prev.filter(note => note.id !== noteId))
+        console.log('Note successfully deleted from Supabase and state updated')
+      } catch (error) {
+        console.error('Not silinirken hata:', error)
+        alert('Not silinemedi. Lütfen tekrar deneyin.')
+      }
     }
-
-    // Kişiye ait borç işlemlerini bul
-    const personDebts = transactions.filter(t => 
-      (t.person === personName || t.institution === personName) && 
-      t.category === 'Borç' && 
-      t.type === 'expense'
-    );
-
-    if (personDebts.length === 0) {
-      alert('Bu kişi için ödenecek borç bulunamadı!');
-      return;
-    }
-
-    // Toplam borcu hesapla
-    const totalPersonDebt = personDebts.reduce((sum, t) => sum + t.amount, 0);
-    
-    // Ödenen miktar toplam borcu geçiyorsa uyar
-    if (amount > totalPersonDebt) {
-      alert(`Bu kişinin toplam borcu ₺${totalPersonDebt.toFixed(2)}. Ödeme miktarı bu değeri geçemez!`);
-      return;
-    }
-
-    // Ödeme işlemini oluştur
-    const paymentTransaction: Transaction = {
-      id: Date.now().toString(),
-      type: 'income',
-      amount: amount,
-      category: 'Borç Ödemesi',
-      description: `${personName} borç ödemesi`,
-      account: 'cash', // Varsayılan olarak nakit hesaba
-      date: new Date().toISOString(),
-      person: personName
-    }
-    
-    console.log('Ödeme işlemi oluşturuluyor:', paymentTransaction);
-    
-    // Önce ödeme işlemini ekle
-    setTransactions(prev => {
-      const updated = [paymentTransaction, ...prev];
-      console.log('İşlemler güncellendi:', updated);
-      return updated;
-    });
-    
-    // Sonra bakiyeyi güncelle
-    setBalances(prev => {
-      const updated = { ...prev, cash: prev.cash + amount };
-      console.log('Bakiyeler güncellendi:', updated);
-      return updated;
-    });
-
-    // Başarı mesajı göster
-    alert(`✅ ${personName} için ₺${amount.toFixed(2)} borç ödemesi başarıyla kaydedildi!\n\nNot: Borç tamamen ödendiğinde otomatik olarak listeden kaldırılacaktır.`);
   }
 
-  // Aylık verileri hazırlama
+  const getFilteredNotes = () => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    return notes.filter(note => {
+      const noteDate = new Date(note.date)
+      noteDate.setHours(0, 0, 0, 0)
+
+      switch (noteFilter) {
+        case 'today':
+          return noteDate.getTime() === today.getTime()
+        case 'week':
+          const weekFromNow = new Date(today)
+          weekFromNow.setDate(weekFromNow.getDate() + 7)
+          return noteDate >= today && noteDate <= weekFromNow
+        case 'month':
+          const monthFromNow = new Date(today)
+          monthFromNow.setMonth(monthFromNow.getMonth() + 1)
+          return noteDate >= today && noteDate <= monthFromNow
+        default:
+          return true
+      }
+    })
+  }
+
+  // {t('app.monthlyDataPreparation')}
   const getMonthlyData = () => {
     const monthlyData: { ay: string; gelir: number; gider: number; net: number }[] = []
     const currentYear = new Date().getFullYear()
@@ -573,73 +603,74 @@ export default function CepFinansApp() {
     return monthlyData
   }
 
+  // Kullanıcı giriş yapmamışsa yükleme göster
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+          </div>
+          <p className="text-gray-600 dark:text-gray-400 text-lg">Yükleniyor...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Kullanıcı giriş yapmamışsa giriş sayfasına yönlendir
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+            Giriş Gerekli
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">
+            Bu sayfaya erişmek için giriş yapmanız gerekmektedir.
+          </p>
+          <Button 
+            onClick={() => window.location.href = '/'}
+            className="bg-green-600 hover:bg-green-700 text-white px-6 py-3"
+          >
+            Ana Sayfaya Dön
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   if (isFirstTime) {
     return <InitialSetup onComplete={handleInitialSetup} />
   }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <div className="max-w-7xl mx-auto p-4 md:p-6">
+      <div className="max-w-7xl mx-auto p-4 md:p-6 pb-32">
         {/* Header */}
         <header className="mb-8 flex justify-between items-start">
-          <div>
+          <div className="flex items-center gap-4">
             <Link href="/" className="hover:opacity-80 transition-opacity duration-200">
-              <h1 className="text-5xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent mb-2">
-                CepFinans
-              </h1>
+              <img 
+                src="/favicon.png" 
+                alt={t('app.title')} 
+                className="w-12 h-12 rounded-xl shadow-sm"
+              />
             </Link>
-            <p className="text-gray-600 dark:text-gray-400 text-lg">Modern Kişisel Muhasebe</p>
+            <div>
+              <Link href="/" className="hover:opacity-80 transition-opacity duration-200">
+                <h1 className="text-5xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent mb-2">
+                  {t('app.title')}
+                </h1>
+              </Link>
+              <p className="text-gray-600 dark:text-gray-400 text-lg">{t('app.modernPersonalFinance')}</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="icon" className="bg-white dark:bg-gray-800 border">
-                  <Settings className="h-4 w-4" />
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="bg-white dark:bg-gray-800">
-                <DialogHeader>
-                  <DialogTitle>Ayarlar</DialogTitle>
-                  <DialogDescription>
-                    Verilerinizi yönetin
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm font-medium">Veri Yedekleme</Label>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
-                      Tüm verilerinizi JSON formatında yedekleyin
-                    </p>
-                    <Button onClick={backupData} className="w-full bg-green-600 hover:bg-green-700">
-                      <Download className="h-4 w-4 mr-2" />
-                      Yedekle
-                    </Button>
-                  </div>
-                  
-                  <div>
-                    <Label className="text-sm font-medium">Veri Geri Yükleme</Label>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
-                      Önceden aldığınız yedeği geri yükleyin
-                    </p>
-                    <div className="relative">
-                      <Input
-                        type="file"
-                        accept=".json"
-                        onChange={restoreData}
-                        className="sr-only"
-                        id="restore-file"
-                      />
-                      <Button asChild className="w-full">
-                        <label htmlFor="restore-file" className="cursor-pointer flex items-center">
-                          <Upload className="h-4 w-4 mr-2" />
-                          Geri Yükle
-                        </label>
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <UserAuthButton />
+            <LanguageToggle />
             <ThemeToggle />
           </div>
         </header>
@@ -648,20 +679,20 @@ export default function CepFinansApp() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card className="bg-green-500/10 border-green-500/20 dark:bg-green-900/20 dark:border-green-800/30">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">Toplam Bakiye</CardTitle>
+              <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">{t('app.totalBalance')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-green-800 dark:text-green-200">₺{totalBalance.toFixed(2)}</div>
               <div className="flex items-center gap-2 mt-2 text-green-600 dark:text-green-400">
                 <DollarSign className="h-4 w-4" />
-                <span className="text-sm">Tüm Hesaplar</span>
+                <span className="text-sm">{t('app.allAccounts')}</span>
               </div>
             </CardContent>
           </Card>
 
           <Card className="bg-blue-500/10 border-blue-500/20 dark:bg-blue-900/20 dark:border-blue-800/30">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300">Aylık Sabit Gelir</CardTitle>
+              <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300">{t('app.monthlyRecurringIncome')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-blue-800 dark:text-blue-200">₺{monthlyIncome.toFixed(2)}</div>
@@ -674,7 +705,7 @@ export default function CepFinansApp() {
 
           <Card className="bg-red-500/10 border-red-500/20 dark:bg-red-900/20 dark:border-red-800/30">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300">Aylık Sabit Gider</CardTitle>
+              <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300">{t('app.monthlyRecurringExpense')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-red-800 dark:text-red-200">₺{monthlyExpense.toFixed(2)}</div>
@@ -687,23 +718,23 @@ export default function CepFinansApp() {
 
           <Card className="bg-purple-500/10 border-purple-500/20 dark:bg-purple-900/20 dark:border-purple-800/30">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-purple-700 dark:text-purple-300">Aylık Net</CardTitle>
+              <CardTitle className="text-sm font-medium text-purple-700 dark:text-purple-300">{t('app.monthlyNet')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-purple-800 dark:text-purple-200">₺{(monthlyIncome - monthlyExpense).toFixed(2)}</div>
               <div className="flex items-center gap-2 mt-2 text-purple-600 dark:text-purple-400">
                 <Target className="h-4 w-4" />
-                <span className="text-sm">Tahmini birikim</span>
+                <span className="text-sm">{t('app.estimatedSavings')}</span>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Hesap Bakiyeleri */}
+        {/* {t('app.accountBalances')} */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card className="bg-white dark:bg-gray-800 shadow-sm border">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Nakit</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('app.cash')}</CardTitle>
               <Wallet className="h-5 w-5 text-green-600" />
             </CardHeader>
             <CardContent>
@@ -713,7 +744,7 @@ export default function CepFinansApp() {
 
           <Card className="bg-white dark:bg-gray-800 shadow-sm border">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Banka</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('app.bank')}</CardTitle>
               <Building className="h-5 w-5 text-blue-600" />
             </CardHeader>
             <CardContent>
@@ -723,7 +754,7 @@ export default function CepFinansApp() {
 
           <Card className="bg-white dark:bg-gray-800 shadow-sm border">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Birikim</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('app.savings')}</CardTitle>
               <PiggyBank className="h-5 w-5 text-purple-600" />
             </CardHeader>
             <CardContent>
@@ -731,156 +762,41 @@ export default function CepFinansApp() {
             </CardContent>
           </Card>
 
-          <Card className="bg-red-500/10 border-red-500/20 dark:bg-red-900/20 dark:border-red-800/30">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300">Toplam Borç</CardTitle>
-              <AlertCircle className="h-5 w-5 text-red-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-800 dark:text-red-200">₺{remainingDebt.toFixed(2)}</div>
-              <div className="flex items-center gap-2 mt-2 text-red-600 dark:text-red-400">
-                <span className="text-sm">Kalan: {debtTransactions.length} işlem</span>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
-        {/* Hızlı İşlemler */}
+        {/* {t('app.quickTransactions')} */}
         <div className="flex flex-wrap gap-4 mb-8">
           <Dialog open={showAddTransaction} onOpenChange={setShowAddTransaction}>
             <DialogTrigger asChild>
               <Button className="bg-green-600 hover:bg-green-700 shadow-sm">
                 <Plus className="h-4 w-4 mr-2" />
-                Yeni İşlem Ekle
+                {t('app.addNewTransaction')}
               </Button>
             </DialogTrigger>
             <DialogContent className="bg-white dark:bg-gray-800">
               <DialogHeader>
-                <DialogTitle>Yeni İşlem Ekle</DialogTitle>
+                <DialogTitle>{t('app.addTransaction')}</DialogTitle>
                 <DialogDescription>
-                  Gelir veya gider işlemini ekleyin
+                  {t('app.addTransactionDesc')}
                 </DialogDescription>
               </DialogHeader>
               <AddTransactionForm onSubmit={addTransaction} onClose={() => setShowAddTransaction(false)} />
             </DialogContent>
           </Dialog>
 
-          <Dialog open={showDebtDialog} onOpenChange={setShowDebtDialog}>
-            <DialogTrigger asChild>
-              <Button className="bg-red-600 hover:bg-red-700 shadow-sm">
-                <AlertCircle className="h-4 w-4 mr-2" />
-                Borç Ekle
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="bg-white dark:bg-gray-800">
-              <DialogHeader>
-                <DialogTitle>Yeni Borç Ekle</DialogTitle>
-                <DialogDescription>
-                  Kişi veya kurumdan borç ekleyin
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={addDebt} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label>Kişi/Kurum *</Label>
-                    <Input
-                      type="text"
-                      name="person"
-                      value={debtFormData.person}
-                      onChange={handleDebtInputChange}
-                      required
-                      placeholder="Kişi veya kurum adı"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label>Kurum (Opsiyonel)</Label>
-                    <Input
-                      type="text"
-                      name="institution"
-                      value={debtFormData.institution}
-                      onChange={handleDebtInputChange}
-                      placeholder="Banka, kredi kartı vb."
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-                
-                <div>
-                  <Label>Borç Tutarı *</Label>
-                  <Input
-                    type="number"
-                    name="amount"
-                    value={debtFormData.amount}
-                    onChange={handleDebtInputChange}
-                    required
-                    placeholder="0.00"
-                    className="mt-1"
-                  />
-                </div>
-                
-                <div>
-                  <Label>Açıklama</Label>
-                  <textarea
-                    name="description"
-                    value={debtFormData.description}
-                    onChange={handleDebtInputChange}
-                    rows={3}
-                    placeholder="Borç açıklaması (örn: kredi kartı borcu, ihtiyaç kredisi vb.)"
-                    className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent dark:bg-gray-700 dark:text-white resize-none"
-                  />
-                </div>
-                
-                <div>
-                  <Label>Hesap *</Label>
-                  <Select value={debtFormData.account} onValueChange={(value: 'cash' | 'bank' | 'savings') => 
-                    setDebtFormData(prev => ({ ...prev, account: value }))
-                  }>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Hesap seçin" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cash">Nakit</SelectItem>
-                      <SelectItem value="bank">Banka</SelectItem>
-                      <SelectItem value="savings">Birikim</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="flex gap-3 justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setShowDebtDialog(false)}
-                    className="border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all duration-300 hover:scale-105"
-                  >
-                    İptal
-                  </Button>
-                  
-                  <Button
-                    type="submit"
-                    className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 flex items-center gap-2 transition-all duration-300 hover:scale-105"
-                  >
-                    <AlertCircle className="w-4 h-4" />
-                    Borç Ekle
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
 
           <Dialog open={showTransferDialog} onOpenChange={setShowTransferDialog}>
             <DialogTrigger asChild>
               <Button variant="outline" className="bg-white dark:bg-gray-800 border">
                 <ArrowRightLeft className="h-4 w-4 mr-2" />
-                Para Transferi
+                {t('app.transferTitle')}
               </Button>
             </DialogTrigger>
             <DialogContent className="bg-white dark:bg-gray-800">
               <DialogHeader>
-                <DialogTitle>Hesaplar Arası Transfer</DialogTitle>
+                <DialogTitle>{t('app.transferBetweenAccounts')}</DialogTitle>
                 <DialogDescription>
-                  Hesaplar arasında para transferi yapın
+                  {t('app.transferDesc')}
                 </DialogDescription>
               </DialogHeader>
               <TransferForm onSubmit={addTransfer} onClose={() => setShowTransferDialog(false)} balances={balances} />
@@ -891,14 +807,14 @@ export default function CepFinansApp() {
             <DialogTrigger asChild>
               <Button variant="outline" className="bg-white dark:bg-gray-800 border">
                 <Repeat className="h-4 w-4 mr-2" />
-                Sabit İşlem Ekle
+                {t('app.addRecurring')}
               </Button>
             </DialogTrigger>
             <DialogContent className="bg-white dark:bg-gray-800 max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Sabit Gelir/Gider Ekle</DialogTitle>
+                <DialogTitle>{t('app.addRecurring')}</DialogTitle>
                 <DialogDescription>
-                  Aylık veya yıllık tekrar eden işlemleri ekleyin
+                  {t('app.addRecurringDesc')}
                 </DialogDescription>
               </DialogHeader>
               <RecurringTransactionForm onSubmit={addRecurringTransaction} onClose={() => setShowRecurringDialog(false)} />
@@ -906,13 +822,13 @@ export default function CepFinansApp() {
           </Dialog>
         </div>
 
-        {/* Gelecek İşlemler Sayaç Alanı */}
+        {/* {t('app.upcomingTransactionsArea')} */}
         {upcomingTransactions.length > 0 && (
           <Card className="mb-8 bg-orange-500/10 border-orange-500/20 dark:bg-orange-900/20 dark:border-orange-800/30">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
                 <Timer className="h-5 w-5" />
-                Yaklaşan İşlemler
+                {t('app.upcomingTransactions')}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -921,7 +837,7 @@ export default function CepFinansApp() {
                   <div key={transaction.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border">
                     <div className="flex items-center justify-between mb-2">
                       <Badge variant={transaction.type === 'income' ? 'default' : 'destructive'} className="text-xs">
-                        {transaction.type === 'income' ? 'Gelir' : 'Gider'}
+                        {transaction.type === 'income' ? t('app.income') : t('app.expense')}
                       </Badge>
                       <div className="flex items-center gap-1">
                         <Clock className="h-3 w-3 text-orange-600 dark:text-orange-400" />
@@ -949,418 +865,12 @@ export default function CepFinansApp() {
           </Card>
         )}
 
-        {/* Borç Takibi */}
-        {debtTransactions.length > 0 && (
-          <Card 
-            className="mb-8 bg-red-500/10 border-red-500/20 dark:bg-red-900/20 dark:border-red-800/30 transition-all duration-700 ease-out"
-            style={{
-              animation: 'slideInFromTop 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)',
-              animationDelay: '0.3s',
-              animationFillMode: 'both'
-            }}
-          >
-            <CardHeader 
-              className="cursor-pointer hover:bg-red-500/5 transition-all duration-400 ease-in-out"
-              onClick={() => setShowDebtSection(!showDebtSection)}
-            >
-              <CardTitle className="flex items-center justify-between text-red-700 dark:text-red-300">
-                <div className="flex items-center gap-2">
-                  <AlertCircle 
-                    className="h-5 w-5 transition-all duration-400 hover:scale-110 hover:rotate-12"
-                    style={{
-                      animation: 'bounceIn 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
-                      animationDelay: '0.5s',
-                      animationFillMode: 'both'
-                    }}
-                  />
-                  <span 
-                    className="font-bold text-lg"
-                    style={{
-                      animation: 'fadeInLeft 0.6s ease-out',
-                      animationDelay: '0.7s',
-                      animationFillMode: 'both'
-                    }}
-                  >
-                    Borç Takibi
-                  </span>
-                  <span 
-                    className="text-sm font-normal text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 px-2 py-1 rounded-full"
-                    style={{
-                      animation: 'fadeInScale 0.5s ease-out',
-                      animationDelay: '0.9s',
-                      animationFillMode: 'both'
-                    }}
-                  >
-                    ({Object.keys(activeDebtsByPerson).length} kişi/kurum)
-                  </span>
-                </div>
-                <ChevronRight 
-                  className={`h-4 w-4 transition-all duration-400 ease-in-out hover:scale-110 ${
-                    showDebtSection ? 'rotate-90' : ''
-                  }`}
-                  style={{
-                    animation: 'fadeInRight 0.6s ease-out',
-                    animationDelay: '1.1s',
-                    animationFillMode: 'both'
-                  }}
-                />
-              </CardTitle>
-            </CardHeader>
-            
-            <div 
-              className="transition-all duration-700 ease-in-out overflow-hidden"
-              style={{
-                maxHeight: showDebtSection ? '2000px' : '0',
-                opacity: showDebtSection ? 1 : 0,
-                transform: showDebtSection ? 'translateY(0) scaleY(1)' : 'translateY(-20px) scaleY(0.8)',
-                transformOrigin: 'top',
-                animation: showDebtSection ? 'expandIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'collapseOut 0.4s ease-in'
-              }}
-            >
-              <CardContent className="p-6">
-                <div className="space-y-4 max-h-96 overflow-y-auto">
-                  {Object.entries(activeDebtsByPerson).map(([key, debtData], index) => (
-                    <div 
-                      key={key} 
-                      className="bg-white dark:bg-gray-800 rounded-lg p-4 border relative transition-all duration-500 ease-out hover:shadow-xl hover:scale-[1.03] hover:border-red-300 dark:hover:border-red-600 hover:-translate-y-1"
-                      style={{
-                        animation: 'slideInFromLeft 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                        animationDelay: `${1.3 + (index * 0.15)}s`,
-                        animationFillMode: 'both',
-                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <h4 
-                            className="font-semibold text-gray-900 dark:text-white transition-all duration-300 hover:text-red-600 dark:hover:text-red-400 hover:scale-105"
-                            style={{
-                              animation: 'fadeInUp 0.5s ease-out',
-                              animationDelay: `${1.5 + (index * 0.15)}s`,
-                              animationFillMode: 'both'
-                            }}
-                          >
-                            {debtData.person || debtData.institution || 'Bilinmeyen'}
-                          </h4>
-                          {debtData.institution && (
-                            <p 
-                              className="text-sm text-gray-600 dark:text-gray-400 transition-all duration-300 hover:text-gray-800 dark:hover:text-gray-200"
-                              style={{
-                                animation: 'fadeInUp 0.5s ease-out',
-                                animationDelay: `${1.7 + (index * 0.15)}s`,
-                                animationFillMode: 'both'
-                              }}
-                            >
-                              {debtData.institution}
-                            </p>
-                          )}
-                        </div>
-                        <div 
-                          className="text-right transition-all duration-300 hover:scale-105"
-                          style={{
-                            animation: 'fadeInUp 0.5s ease-out',
-                            animationDelay: `${1.9 + (index * 0.15)}s`,
-                            animationFillMode: 'both'
-                          }}
-                        >
-                          <div className="text-lg font-bold text-red-600 transition-all duration-300 hover:text-red-700 hover:scale-110">
-                            ₺{debtData.remainingDebt.toFixed(2)}
-                          </div>
-                          <div className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full inline-block mt-1">
-                            {debtData.totalDebt > 0 ? `Toplam: ₺${debtData.totalDebt.toFixed(2)}` : ''}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div 
-                        className="space-y-2"
-                        style={{
-                          animation: 'fadeIn 0.4s ease-out',
-                          animationDelay: `${2.1 + (index * 0.15)}s`,
-                          animationFillMode: 'both'
-                        }}
-                      >
-                        {debtData.transactions.map((transaction, transIndex) => (
-                          <div 
-                            key={transaction.id} 
-                            className="flex items-center justify-between py-2 px-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0 transition-all duration-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg hover:scale-[1.02] hover:shadow-md"
-                            style={{
-                              animation: `slideInFromRight 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)`,
-                              animationDelay: `${2.3 + (index * 0.15) + (transIndex * 0.08)}s`,
-                              animationFillMode: 'both'
-                            }}
-                          >
-                            <div className="flex items-center gap-2">
-                              <Badge 
-                                variant={transaction.type === 'income' ? 'default' : 'destructive'} 
-                                className="text-xs transition-all duration-300 hover:scale-110 hover:shadow-md"
-                              >
-                                {transaction.type === 'income' ? '✓ Ödeme' : '✗ Borç'}
-                              </Badge>
-                              <span className="text-sm font-medium">{transaction.category}</span>
-                            </div>
-                            <div className={`text-lg font-bold transition-all duration-300 hover:scale-110 ${
-                              transaction.type === 'income' ? 'text-green-600 hover:text-green-700' : 'text-red-600 hover:text-red-700'
-                            }`}>
-                              {transaction.type === 'income' ? '+' : '-'}₺{transaction.amount.toFixed(2)}
-                            </div>
-                            <div className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
-                              {new Date(transaction.date).toLocaleDateString('tr-TR')}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      {debtData.remainingDebt > 0 && (
-                        <div 
-                          className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 flex items-center justify-between transition-all duration-600"
-                          style={{
-                            animation: 'fadeInUp 0.6s ease-out',
-                            animationDelay: `${2.5 + (index * 0.15)}s`,
-                            animationFillMode: 'both'
-                          }}
-                        >
-                          <div className="text-xs text-red-600 dark:text-red-400 transition-all duration-300">
-                            <strong>💡 Öneri:</strong> Bu borcu ödemek için butonu kullanın.
-                          </div>
-                          <Button
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation(); // Event propagation'ı durdur
-                              console.log('Butona tıklandı!');
-                              payDebt(debtData.person || debtData.institution || 'Bilinmeyen', debtData.remainingDebt);
-                            }}
-                            className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white px-4 py-2 text-xs transition-all duration-400 hover:scale-110 hover:shadow-xl hover:rotate-1 active:scale-95 border-0"
-                            style={{
-                              animation: 'bounceInUp 0.8s cubic-bezierzier(0.68, -0.55, 0.265, 1.55)',
-                              animationDelay: `${2.7 + (index * 0.15)}s`,
-                              animationFillMode: 'both',
-                              boxShadow: '0 10px 25px -5px rgba(16, 185, 129, 0.25)'
-                            }}
-                          >
-                            <CheckCircle className="w-3 h-3 mr-1 transition-all duration-300 hover:rotate-180 hover:scale-125" />
-                            Borcu Öde
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                
-                {remainingDebt > 0 && (
-                  <div 
-                    className="mt-4 p-4 bg-gradient-to-r from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 rounded-lg border border-red-200 dark:border-red-800 transition-all duration-600 hover:shadow-lg"
-                    style={{
-                      animation: 'slideInFromBottom 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                      animationDelay: `${3.0 + (Object.keys(activeDebtsByPerson).length * 0.15)}s`,
-                      animationFillMode: 'both'
-                    }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-red-800 dark:text-red-200 transition-all duration-300">
-                        💰 Toplam Kalan Borç:
-                      </span>
-                      <span 
-                        className="text-lg font-bold text-red-800 dark:text-red-200 transition-all duration-300 hover:scale-110"
-                        style={{
-                          animation: 'pulse 2.5s infinite',
-                          animationDelay: `${3.5 + (Object.keys(activeDebtsByPerson).length * 0.15)}s`
-                        }}
-                      >
-                        ₺{remainingDebt.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </div>
-          </Card>
-        )}
-
-        {/* CSS Animasyonları */}
-        <style jsx>{`
-          @keyframes slideInFromTop {
-            0% {
-              opacity: 0;
-              transform: translateY(-50px) scale(0.9);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-            }
-          }
-
-          @keyframes slideInFromLeft {
-            0% {
-              opacity: 0;
-              transform: translateX(-50px) scale(0.8);
-            }
-            100% {
-              opacity: 1;
-              transform: translateX(0) scale(1);
-            }
-          }
-
-          @keyframes slideInFromRight {
-            0% {
-              opacity: 0;
-              transform: translateX(50px) scale(0.8);
-            }
-            100% {
-              opacity: 1;
-              transform: translateX(0) scale(1);
-            }
-          }
-
-          @keyframes slideInFromBottom {
-            0% {
-              opacity: 0;
-              transform: translateY(50px) scale(0.9);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-            }
-          }
-
-          @keyframes fadeInUp {
-            0% {
-              opacity: 0;
-              transform: translateY(30px);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-
-          @keyframes fadeInLeft {
-            0% {
-              opacity: 0;
-              transform: translateX(-30px);
-            }
-            100% {
-              opacity: 1;
-              transform: translateX(0);
-            }
-          }
-
-          @keyframes fadeInRight {
-            0% {
-              opacity: 0;
-              transform: translateX(30px);
-            }
-            100% {
-              opacity: 1;
-              transform: translateX(0);
-            }
-          }
-
-          @keyframes fadeInScale {
-            0% {
-              opacity: 0;
-              transform: scale(0.5);
-            }
-            100% {
-              opacity: 1;
-              transform: scale(1);
-            }
-          }
-
-          @keyframes fadeIn {
-            0% {
-              opacity: 0;
-            }
-            100% {
-              opacity: 1;
-            }
-          }
-
-          @keyframes bounceIn {
-            0% {
-              opacity: 0;
-              transform: scale(0.3);
-            }
-            50% {
-              opacity: 1;
-              transform: scale(1.05);
-            }
-            70% {
-              transform: scale(0.9);
-            }
-            100% {
-              opacity: 1;
-              transform: scale(1);
-            }
-          }
-
-          @keyframes bounceInUp {
-            0% {
-              opacity: 0;
-              transform: translateY(100px) scale(0.3);
-            }
-            60% {
-              opacity: 1;
-              transform: translateY(-10px) scale(1.05);
-            }
-            80% {
-              transform: translateY(5px) scale(0.95);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-            }
-          }
-
-          @keyframes expandIn {
-            0% {
-              opacity: 0;
-              transform: translateY(-30px) scaleY(0.5);
-              filter: blur(2px);
-            }
-            50% {
-              opacity: 0.8;
-              transform: translateY(-10px) scaleY(0.9);
-              filter: blur(1px);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0) scaleY(1);
-              filter: blur(0px);
-            }
-          }
-
-          @keyframes collapseOut {
-            0% {
-              opacity: 1;
-              transform: translateY(0) scaleY(1);
-              filter: blur(0px);
-            }
-            100% {
-              opacity: 0;
-              transform: translateY(-20px) scaleY(0.8);
-              filter: blur(2px);
-            }
-          }
-
-          @keyframes pulse {
-            0%, 100% {
-              opacity: 1;
-              transform: scale(1);
-            }
-            50% {
-              opacity: 0.8;
-              transform: scale(1.05);
-            }
-          }
-        `}</style>
-
         {/* Ana İçerik */}
         <Tabs defaultValue="transactions" className="w-full">
           <TabsList className="grid w-full grid-cols-3 bg-white dark:bg-gray-800 border">
-            <TabsTrigger value="transactions">İşlemler</TabsTrigger>
-            <TabsTrigger value="recurring">Sabit İşlemler</TabsTrigger>
-            <TabsTrigger value="reports">Raporlar</TabsTrigger>
+            <TabsTrigger value="transactions">{t('app.transactions')}</TabsTrigger>
+            <TabsTrigger value="recurring">{t('app.recurring')}</TabsTrigger>
+            <TabsTrigger value="reports">{t('app.reports')}</TabsTrigger>
           </TabsList>
           
           <TabsContent value="transactions">
@@ -1368,7 +878,11 @@ export default function CepFinansApp() {
           </TabsContent>
           
           <TabsContent value="recurring">
-            <RecurringTransactionsList recurringTransactions={recurringTransactions} />
+            <RecurringTransactionsList 
+              recurringTransactions={recurringTransactions} 
+              setRecurringTransactions={setRecurringTransactions} 
+              onEditRecurring={handleEditRecurring} 
+            />
           </TabsContent>
           
           <TabsContent value="reports">
@@ -1383,7 +897,7 @@ export default function CepFinansApp() {
             className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white px-8 py-3 text-lg font-medium shadow-lg transition-all duration-300 hover:scale-105"
           >
             <BarChart3 className="mr-2 w-5 h-5" />
-            İstatistikleri Görüntüle
+            {t('app.viewStatistics')}
           </Button>
         </div>
 
@@ -1393,19 +907,19 @@ export default function CepFinansApp() {
             <DialogHeader>
               <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <BarChart3 className="w-6 h-6 text-green-600" />
-                Finansal İstatistikler
+                {t('app.financialStatistics')}
               </DialogTitle>
               <DialogDescription>
-                Gelir/gider analizi ve hesap dağılımı
+                {t('app.incomeExpenseAnalysis')}
               </DialogDescription>
             </DialogHeader>
             
             <div className="space-y-8 p-6">
-              {/* Hesap Dağılımı - Pasta Grafiği */}
+              {/* {t('app.accountDistributionChart')} */}
               <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-6">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                   <PieChart className="w-5 h-5 text-green-600" />
-                  Hesap Dağılımı
+                  {t('app.accountDistributionChart')}
                 </h3>
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1439,31 +953,31 @@ export default function CepFinansApp() {
                 </div>
                 <div className="grid grid-cols-3 gap-4 mt-4">
                   <div className="text-center p-3 bg-green-100 dark:bg-green-900/20 rounded-lg">
-                    <div className="text-green-800 dark:text-green-200 font-semibold">Nakit</div>
+                    <div className="text-green-800 dark:text-green-200 font-semibold">{t('app.cash')}</div>
                     <div className="text-green-600 dark:text-green-400 text-xl font-bold">₺{balances.cash.toFixed(2)}</div>
                   </div>
                   <div className="text-center p-3 bg-blue-100 dark:bg-blue-900/20 rounded-lg">
-                    <div className="text-blue-800 dark:text-blue-200 font-semibold">Banka</div>
+                    <div className="text-blue-800 dark:text-blue-200 font-semibold">{t('app.bank')}</div>
                     <div className="text-blue-600 dark:text-blue-400 text-xl font-bold">₺{balances.bank.toFixed(2)}</div>
                   </div>
                   <div className="text-center p-3 bg-purple-100 dark:bg-purple-900/20 rounded-lg">
-                    <div className="text-purple-800 dark:text-purple-200 font-semibold">Birikim</div>
+                    <div className="text-purple-800 dark:text-purple-200 font-semibold">{t('app.savings')}</div>
                     <div className="text-purple-600 dark:text-purple-400 text-xl font-bold">₺{balances.savings.toFixed(2)}</div>
                   </div>
                 </div>
               </div>
 
-              {/* Gelir/Gider Grafiği */}
+              {/* {t('app.incomeExpenseChart')} */}
               <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-6">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                   <LineChartIcon className="w-5 h-5 text-green-600" />
-                  Gelir/Gider Karşılaştırması
+                  {t('app.incomeExpenseChart')}
                 </h3>
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={[
-                      { name: 'Toplam Gelir', gelir: totalIncome, gider: 0 },
-                      { name: 'Toplam Gider', gelir: 0, gider: totalExpense }
+                      {name: t('app.totalIncomeReport'), gelir: totalIncome, gider: 0},
+                      {name: t('app.totalExpenseReport'), gelir: 0, gider: totalExpense}
                     ]}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="name" />
@@ -1477,21 +991,21 @@ export default function CepFinansApp() {
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-4">
                   <div className="text-center p-3 bg-green-100 dark:bg-green-900/20 rounded-lg">
-                    <div className="text-green-800 dark:text-green-200 font-semibold">Toplam Gelir</div>
+                    <div className="text-green-800 dark:text-green-200 font-semibold">{t('app.totalIncomeReport')}</div>
                     <div className="text-green-600 dark:text-green-400 text-xl font-bold">₺{totalIncome.toFixed(2)}</div>
                   </div>
                   <div className="text-center p-3 bg-red-100 dark:bg-red-900/20 rounded-lg">
-                    <div className="text-red-800 dark:text-red-200 font-semibold">Toplam Gider</div>
+                    <div className="text-red-800 dark:text-red-200 font-semibold">{t('app.totalExpenseReport')}</div>
                     <div className="text-red-600 dark:text-red-400 text-xl font-bold">₺{totalExpense.toFixed(2)}</div>
                   </div>
                 </div>
               </div>
 
-              {/* Aylık Harcama Trendi */}
+              {/* {t('app.monthlySpendingTrendReport')} */}
               <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-6">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                   <TrendingUp className="w-5 h-5 text-green-600" />
-                  Aylık Harcama Trendi
+                  {t('app.monthlySpendingTrendReport')}
                 </h3>
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1511,7 +1025,242 @@ export default function CepFinansApp() {
             </div>
           </DialogContent>
         </Dialog>
+        {/* İletişim Bölümü */}
+        <div className="mt-8 flex justify-center">
+          <Button 
+            onClick={() => setShowContactDialog(true)}
+            variant="outline"
+            className="border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all duration-300 hover:scale-105"
+          >
+            <Mail className="mr-2 w-4 h-4" />
+            İletişim
+          </Button>
+        </div>
       </div>
+
+      {/* Notlar Bölümü */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-lg z-40">
+        <div className="max-w-6xl mx-auto">
+          <div 
+            className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            onClick={() => setShowNotesSection(!showNotesSection)}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                <FileText className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-white">{t('app.notes')}</h3>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  {notes.length} not • {getFilteredNotes().length} gösteriliyor
+                </p>
+              </div>
+            </div>
+            <ChevronRight 
+              className={`w-4 h-4 text-gray-600 dark:text-gray-400 transition-transform duration-200 ${
+                showNotesSection ? 'rotate-90' : ''
+              }`}
+            />
+          </div>
+          
+          {showNotesSection && (
+            <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900">
+              <div className="flex gap-3 mb-4">
+                <Button
+                  onClick={() => setShowNoteDialog(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  {t('app.writeNote')}
+                </Button>
+                <Button
+                  onClick={() => setShowAllNotesDialog(true)}
+                  variant="outline"
+                  className="border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
+                >
+                  <FileText className="w-4 h-4" />
+                  {t('app.allNotes')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer için boşluk - Notlar bölümü ile çakışmayı önlemek için */}
+      <div className="h-20"></div>
+
+      {/* Not Ekleme Dialog */}
+      {showNoteDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {t('app.newNote')}
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowNoteDialog(false)}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <X className="w-6 h-6" />
+                </Button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Not İçeriği *
+                  </label>
+                  <textarea
+                    value={noteContent}
+                    onChange={(e) => setNoteContent(e.target.value)}
+                    placeholder="Bugün ne düşündünüz? Ne yapmayı planlıyorsunuz?"
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white resize-none"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Etiketler (Opsiyonel)
+                  </label>
+                  <input
+                    type="text"
+                    value={noteTags}
+                    onChange={(e) => setNoteTags(e.target.value)}
+                    placeholder="iş, kişisel, önemli, virgülle ayırın..."
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                  />
+                </div>
+              </div>
+              
+              <div className="flex gap-3 justify-end mt-6">
+                  <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowNoteDialog(false)}
+                  className="border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  {t('app.cancel')}
+                </Button>
+                <Button
+                  onClick={addNote}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  {t('app.saveNoteButton')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tüm Notlar Dialog */}
+      {showAllNotesDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {t('app.allNotesWithCount', { count: getFilteredNotes().length })}
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowAllNotesDialog(false)}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <X className="w-6 h-6" />
+                </Button>
+              </div>
+              
+              {/* Filtreleme Butonları */}
+              <div className="flex gap-2 mb-6">
+                <Button
+                  variant={noteFilter === 'all' ? 'default' : 'outline'}
+                  onClick={() => setNoteFilter('all')}
+                  size="sm"
+                  className="text-xs"
+                >
+                  {t('app.allFilter')}
+                </Button>
+                <Button
+                  variant={noteFilter === 'today' ? 'default' : 'outline'}
+                  onClick={() => setNoteFilter('today')}
+                  size="sm"
+                  className="text-xs"
+                >
+                  Bugün
+                </Button>
+                <Button
+                  variant={noteFilter === 'week' ? 'default' : 'outline'}
+                  onClick={() => setNoteFilter('week')}
+                  size="sm"
+                  className="text-xs"
+                >
+                  Bu Hafta
+                </Button>
+                <Button
+                  variant={noteFilter === 'month' ? 'default' : 'outline'}
+                  onClick={() => setNoteFilter('month')}
+                  size="sm"
+                  className="text-xs"
+                >
+                  Bu Ay
+                </Button>
+              </div>
+              
+              {/* Notlar Listesi */}
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {getFilteredNotes().length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+                    <p>Seçilen filtreye uygun not bulunamadı.</p>
+                  </div>
+                ) : (
+                  getFilteredNotes().map((note) => (
+                    <div key={note.id} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600 hover:shadow-md transition-all">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex-1">
+                          <p className="text-gray-900 dark:text-white whitespace-pre-wrap">{note.content}</p>
+                          {note.tags && note.tags.length > 0 && (
+                            <div className="flex gap-1 mt-2">
+                              {note.tags.map((tag, index) => (
+                                <span key={index} className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded-full">
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteNote(note.id)}
+                          className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 ml-2"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {new Date(note.date).toLocaleDateString('tr-TR', { 
+                          year: 'numeric', 
+                          month: 'long', 
+                          day: 'numeric' 
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="py-12 px-6 border-t border-gray-200 dark:border-gray-800 mt-16">
@@ -1524,21 +1273,9 @@ export default function CepFinansApp() {
               CepFinans
             </span>
           </div>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
-            © 2025 CepFinans. Modern kişisel muhasebe.
+          <p className="text-gray-600 dark:text-gray-400">
+            {t('app.footer')}
           </p>
-          
-          {/* İletişim Linki */}
-          <div className="flex justify-center">
-            <Button 
-              onClick={() => setShowContactDialog(true)}
-              variant="outline"
-              className="border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all duration-300 hover:scale-105"
-            >
-              <Mail className="mr-2 w-4 h-4" />
-              İletişim
-            </Button>
-          </div>
         </div>
       </footer>
 
@@ -1595,7 +1332,7 @@ export default function CepFinansApp() {
                         onChange={handleInputChange}
                         required
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                        placeholder="Adınız Soyadınız"
+                        placeholder={t('contact.namePlaceholder')}
                       />
                     </div>
                     <div>
@@ -1609,7 +1346,7 @@ export default function CepFinansApp() {
                         onChange={handleInputChange}
                         required
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                        placeholder="ornek@email.com"
+                        placeholder={t('contact.emailPlaceholder')}
                       />
                     </div>
                   </div>
@@ -1625,7 +1362,7 @@ export default function CepFinansApp() {
                       onChange={handleInputChange}
                       required
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                      placeholder="Mesajınızın konusu"
+                      placeholder={t('contact.subjectPlaceholder')}
                     />
                   </div>
                   
@@ -1658,7 +1395,7 @@ export default function CepFinansApp() {
                       required
                       rows={4}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white resize-none"
-                      placeholder="Mesajınızı buraya yazın..."
+                      placeholder={t('contact.messagePlaceholder')}
                     />
                   </div>
                 </div>
@@ -1714,11 +1451,24 @@ export default function CepFinansApp() {
           </div>
         </div>
       )}
+
+      {/* Düzenleme Dialog */}
+      {showEditRecurringDialog && editingRecurring && (
+        <EditRecurringDialog
+          recurring={editingRecurring}
+          onSave={updateRecurringTransaction}
+          onCancel={() => {
+            setShowEditRecurringDialog(false)
+            setEditingRecurring(null)
+          }}
+        />
+      )}
     </div>
   )
 }
 
 function InitialSetup({ onComplete }: { onComplete: (balances: AccountBalances) => void }) {
+  const { t } = useLanguage()
   const [balances, setBalances] = useState<AccountBalances>({ cash: 0, bank: 0, savings: 0 })
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1734,10 +1484,10 @@ function InitialSetup({ onComplete }: { onComplete: (balances: AccountBalances) 
             <DollarSign className="h-8 w-8 text-white" />
           </div>
           <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">
-            CepFinans'a Hoş Geldiniz
+            {t('app.initialSetup')}
           </CardTitle>
           <CardDescription className="text-gray-600 dark:text-gray-400">
-            Başlangıç bakiyelerinizi girerek başlayın
+            {t('app.initialSetupDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1797,6 +1547,7 @@ function TransferForm({
   onClose: () => void
   balances: AccountBalances
 }) {
+  const { t } = useLanguage()
   const [formData, setFormData] = useState({
     from: 'cash' as 'cash' | 'bank' | 'savings',
     to: 'bank' as 'cash' | 'bank' | 'savings',
@@ -1805,9 +1556,9 @@ function TransferForm({
   })
 
   const accounts = [
-    { value: 'cash', label: 'Nakit', icon: Wallet, balance: balances.cash },
-    { value: 'bank', label: 'Banka', icon: Building, balance: balances.bank },
-    { value: 'savings', label: 'Birikim', icon: PiggyBank, balance: balances.savings }
+    { value: 'cash', label: t('app.cash'), icon: Wallet, balance: balances.cash },
+    { value: 'bank', label: t('app.bank'), icon: Building, balance: balances.bank },
+    { value: 'savings', label: t('app.savings'), icon: PiggyBank, balance: balances.savings }
   ]
 
   const availableToAccounts = accounts.filter(acc => acc.value !== formData.from)
@@ -1818,7 +1569,7 @@ function TransferForm({
 
     const amount = parseFloat(formData.amount)
     if (amount > balances[formData.from]) {
-      alert('Yetersiz bakiye!')
+      alert(t('app.insufficientBalance'))
       return
     }
 
@@ -1826,7 +1577,7 @@ function TransferForm({
       from: formData.from,
       to: formData.to,
       amount,
-      description: formData.description || `${formData.from} → ${formData.to} transferi`
+      description: formData.description || `${formData.from} → ${formData.to} ${t('app.moneyTransfer')}`
     })
 
     setFormData({
@@ -1844,7 +1595,7 @@ function TransferForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <Label>Transfer Nereden</Label>
+        <Label>{t('app.transferFrom')}</Label>
         <Select value={formData.from} onValueChange={(value: 'cash' | 'bank' | 'savings') => 
           setFormData(prev => ({ ...prev, from: value, to: value === prev.to ? 'cash' : prev.to }))
         }>
@@ -1866,7 +1617,7 @@ function TransferForm({
       </div>
 
       <div>
-        <Label>Transfer Nereye</Label>
+        <Label>{t('app.transferTo')}</Label>
         <Select value={formData.to} onValueChange={(value: 'cash' | 'bank' | 'savings') => 
           setFormData(prev => ({ ...prev, to: value }))
         }>
@@ -1888,7 +1639,7 @@ function TransferForm({
       </div>
 
       <div>
-        <Label>Tutar</Label>
+        <Label>{t('app.amount')}</Label>
         <Input
           type="number"
           step="0.01"
@@ -1900,17 +1651,17 @@ function TransferForm({
         />
         {fromAccount && (
           <p className="text-xs text-gray-500 mt-1">
-            Mevcut bakiye: ₺{fromAccount.balance.toFixed(2)}
+            {t('app.currentBalance')}: ₺{fromAccount.balance.toFixed(2)}
           </p>
         )}
       </div>
 
       <div>
-        <Label>Açıklama</Label>
+        <Label>{t('app.description')}</Label>
         <Input
           value={formData.description}
           onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-          placeholder="İsteğe bağlı"
+          placeholder={t('app.optional')}
         />
       </div>
 
@@ -1937,7 +1688,7 @@ function TransferForm({
       )}
 
       <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-        Transferi Yap
+        {t('app.doTransfer')}
       </Button>
     </form>
   )
@@ -1950,6 +1701,7 @@ function AddTransactionForm({
   onSubmit: (transaction: Omit<Transaction, 'id'>) => void
   onClose: () => void
 }) {
+  const { t } = useLanguage()
   const [formData, setFormData] = useState({
     type: 'expense' as 'income' | 'expense',
     amount: '',
@@ -1960,7 +1712,7 @@ function AddTransactionForm({
 
   const categories = {
     income: ['Maaş', 'Ek Gelir', 'Yatırım', 'Hediye', 'Kira Geliri', 'Diğer'],
-    expense: ['Gıda', 'Ulaşım', 'Eğlence', 'Faturalar', 'Alışveriş', 'Sağlık', 'Eğitim', 'Kira', 'Borç', 'Taksit', 'Diğer']
+    expense: ['Gıda', 'Ulaşım', 'Eğlence', 'Faturalar', 'Alışveriş', 'Sağlık', 'Eğitim', 'Kira', 'Diğer']
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1989,7 +1741,7 @@ function AddTransactionForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <Label>İşlem Türü</Label>
+        <Label>{t('app.transactionType')}</Label>
         <Select value={formData.type} onValueChange={(value: 'income' | 'expense') => 
           setFormData(prev => ({ ...prev, type: value, category: '' }))
         }>
@@ -2004,7 +1756,7 @@ function AddTransactionForm({
       </div>
 
       <div>
-        <Label>Tutar</Label>
+        <Label>{t('app.amount')}</Label>
         <Input
           type="number"
           step="0.01"
@@ -2016,12 +1768,12 @@ function AddTransactionForm({
       </div>
 
       <div>
-        <Label>Kategori</Label>
+        <Label>{t('app.transactionCategory')}</Label>
         <Select value={formData.category} onValueChange={(value) => 
           setFormData(prev => ({ ...prev, category: value }))
         }>
           <SelectTrigger>
-            <SelectValue placeholder="Kategori seçin" />
+            <SelectValue placeholder={t('app.selectCategory')} />
           </SelectTrigger>
           <SelectContent>
             {categories[formData.type].map(category => (
@@ -2032,7 +1784,7 @@ function AddTransactionForm({
       </div>
 
       <div>
-        <Label>Hesap</Label>
+        <Label>{t('app.account')}</Label>
         <Select value={formData.account} onValueChange={(value: 'cash' | 'bank' | 'savings') => 
           setFormData(prev => ({ ...prev, account: value }))
         }>
@@ -2048,11 +1800,11 @@ function AddTransactionForm({
       </div>
 
       <div>
-        <Label>Açıklama</Label>
+        <Label>{t('app.description')}</Label>
         <Input
           value={formData.description}
           onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-          placeholder="İsteğe bağlı"
+          placeholder={t('app.optional')}
         />
       </div>
 
@@ -2070,6 +1822,7 @@ function RecurringTransactionForm({
   onSubmit: (recurring: Omit<RecurringTransaction, 'id'>) => void
   onClose: () => void
 }) {
+  const { t } = useLanguage()
   const [formData, setFormData] = useState({
     type: 'expense' as 'income' | 'expense',
     amount: '',
@@ -2084,7 +1837,7 @@ function RecurringTransactionForm({
 
   const categories = {
     income: ['Maaş', 'Ek Gelir', 'Yatırım', 'Hediye', 'Kira Geliri', 'Diğer'],
-    expense: ['Kira', 'Borç', 'Taksit', 'Faturalar', 'Sigorta', 'Eğitim', 'Diğer']
+    expense: ['Kira', 'Faturalar', 'Sigorta', 'Eğitim', 'Diğer']
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -2122,7 +1875,7 @@ function RecurringTransactionForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label>İşlem Türü</Label>
+          <Label>{t('app.transactionType')}</Label>
           <Select value={formData.type} onValueChange={(value: 'income' | 'expense') => 
             setFormData(prev => ({ ...prev, type: value, category: '' }))
           }>
@@ -2130,14 +1883,14 @@ function RecurringTransactionForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="income">Gelir</SelectItem>
-              <SelectItem value="expense">Gider</SelectItem>
+              <SelectItem value="income">{t('app.income')}</SelectItem>
+              <SelectItem value="expense">{t('app.expense')}</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
         <div>
-          <Label>Tekrar Sıklığı</Label>
+          <Label>{t('app.recurringFrequency')}</Label>
           <Select value={formData.frequency} onValueChange={(value: 'monthly' | 'yearly') => 
             setFormData(prev => ({ ...prev, frequency: value }))
           }>
@@ -2145,15 +1898,15 @@ function RecurringTransactionForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="monthly">Aylık</SelectItem>
-              <SelectItem value="yearly">Yıllık</SelectItem>
+              <SelectItem value="monthly">{t('app.monthly')}</SelectItem>
+              <SelectItem value="yearly">{t('app.yearly')}</SelectItem>
             </SelectContent>
           </Select>
         </div>
       </div>
 
       <div>
-        <Label>Tutar</Label>
+        <Label>{t('app.amount')}</Label>
         <Input
           type="number"
           step="0.01"
@@ -2165,12 +1918,12 @@ function RecurringTransactionForm({
       </div>
 
       <div>
-        <Label>Kategori</Label>
+        <Label>{t('app.transactionCategory')}</Label>
         <Select value={formData.category} onValueChange={(value) => 
           setFormData(prev => ({ ...prev, category: value }))
         }>
           <SelectTrigger>
-            <SelectValue placeholder="Kategori seçin" />
+            <SelectValue placeholder={t('app.selectCategory')} />
           </SelectTrigger>
           <SelectContent>
             {categories[formData.type].map(category => (
@@ -2182,7 +1935,7 @@ function RecurringTransactionForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label>Gün ({formData.frequency === 'monthly' ? 'Ayın' : 'Ayın'})</Label>
+          <Label>{t('app.day')} ({formData.frequency === 'monthly' ? t('app.ofMonth') : t('app.ofYear')})</Label>
           <Select value={formData.dayOfMonth.toString()} onValueChange={(value) => 
             setFormData(prev => ({ ...prev, dayOfMonth: parseInt(value) }))
           }>
@@ -2199,7 +1952,7 @@ function RecurringTransactionForm({
 
         {formData.frequency === 'yearly' && (
           <div>
-            <Label>Ay</Label>
+            <Label>{t('app.month')}</Label>
             <Select value={formData.monthOfYear.toString()} onValueChange={(value) => 
               setFormData(prev => ({ ...prev, monthOfYear: parseInt(value) }))
             }>
@@ -2226,7 +1979,7 @@ function RecurringTransactionForm({
       </div>
 
       <div>
-        <Label>Hesap</Label>
+        <Label>{t('app.account')}</Label>
         <Select value={formData.account} onValueChange={(value: 'cash' | 'bank' | 'savings') => 
           setFormData(prev => ({ ...prev, account: value }))
         }>
@@ -2242,7 +1995,7 @@ function RecurringTransactionForm({
       </div>
 
       <div>
-        <Label>Açıklama</Label>
+        <Label>{t('app.description')}</Label>
         <Input
           value={formData.description}
           onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
@@ -2251,7 +2004,7 @@ function RecurringTransactionForm({
       </div>
 
       <div>
-        <Label>Başlangıç Tarihi</Label>
+        <Label>{t('app.startDate')}</Label>
         <Input
           type="date"
           value={formData.startDate}
@@ -2260,9 +2013,121 @@ function RecurringTransactionForm({
       </div>
 
       <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-        Sabit İşlemi Ekle
+        {t('app.addRecurringTransaction')}
       </Button>
     </form>
+  )
+}
+
+}
+
+function RecurringTransactionsList({ recurringTransactions, setRecurringTransactions, onEditRecurring }: { 
+  recurringTransactions: RecurringTransaction[]
+  setRecurringTransactions: React.Dispatch<React.SetStateAction<RecurringTransaction[]>>
+  onEditRecurring: (recurring: RecurringTransaction) => void
+}) {
+  const { t } = useLanguage()
+  const toggleRecurring = (id: string) => {
+    setRecurringTransactions(prev => 
+      prev.map(r => 
+        r.id === id ? { ...r, isActive: !r.isActive } : r
+      )
+    )
+  }
+
+  return (
+    <Card className="bg-white dark:bg-gray-800 shadow-sm border">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Repeat className="h-5 w-5" />
+          {t('app.recurringTransactions')}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4 max-h-96 overflow-y-auto">
+          {recurringTransactions.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">{t('app.noRecurringTransactions')}</p>
+          ) : (
+            recurringTransactions.map(recurring => (
+              <div key={recurring.id} className={`p-4 rounded-lg ${
+                recurring.isActive 
+                  ? 'bg-gray-50 dark:bg-gray-700' 
+                  : 'bg-gray-100 dark:bg-gray-600 opacity-60'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={
+                        recurring.type === 'income' ? 'default' : 
+                        recurring.type === 'expense' ? 'destructive' : 
+                        'secondary'
+                      }>
+                        {recurring.type === 'income' ? t('app.income') : 
+                         recurring.type === 'expense' ? t('app.expense') : 'Transfer'}
+                      }
+                      </Badge>
+                      <span className="font-medium">{recurring.category}</span>
+                      {recurring.isActive && (
+                        <Badge variant="outline" className="text-xs">
+                          <AlertCircle className="h-3 w-3 mr-1" />
+                          Aktif
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 mt-1">
+                        {recurring.frequency === 'daily' && 'Her gün' ||
+                         recurring.frequency === 'weekly' && `Haftanın ${recurring.dayOfWeek}. günü` ||
+                         recurring.frequency === 'monthly' && `Her ayın ${recurring.dayOfMonth}. günü` ||
+                         recurring.frequency === 'yearly' && `Her yıl ${recurring.monthOfYear}. ayın ${recurring.dayOfMonth}. günü`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-bold ${
+                    recurring.type === 'income' ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {recurring.type === 'income' ? '+' : '-'}₺{recurring.amount.toFixed(2)}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleRecurring(recurring.id)}
+                      className="text-xs"
+                    >
+                      {recurring.isActive ? 'Pasif Et' : 'Aktif Et'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onEditRecurring(recurring)}
+                      className="text-xs"
+                    >
+                      Düzenle
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    {recurring.description && (
+                      <span className="text-gray-700 dark:text-gray-300">{recurring.description}</span>
+                    )}
+                    <p className="text-xs text-gray-500 mt-1">
+                      {recurring.frequency === 'daily' && 'Her gün' ||
+                       recurring.frequency === 'weekly' && `Haftanın ${recurring.dayOfWeek}. günü` ||
+                       recurring.frequency === 'monthly' && `Her ayın ${recurring.dayOfMonth}. günü` ||
+                       recurring.frequency === 'yearly' && `Her yıl ${recurring.monthOfYear}. ayın ${recurring.dayOfMonth}. günü`}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -2275,6 +2140,7 @@ function TransactionList({
   selectedDate: string
   onDateChange: (date: string) => void
 }) {
+  const { t } = useLanguage()
   const uniqueDates = Array.from(new Set(
     transactions.map(t => new Date(t.date).toLocaleDateString('tr-TR'))
   )).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
@@ -2287,7 +2153,7 @@ function TransactionList({
     <Card className="bg-white dark:bg-gray-800 shadow-sm border">
       <CardHeader>
         <div className="flex justify-between items-center">
-          <CardTitle>İşlemler</CardTitle>
+          <CardTitle>{t('app.transactions')}</CardTitle>
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4" />
             <Select value={selectedDate} onValueChange={onDateChange}>
@@ -2295,7 +2161,7 @@ function TransactionList({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Tümü</SelectItem>
+                <SelectItem value="all">{t('app.all')}</SelectItem>
                 {uniqueDates.map(date => (
                   <SelectItem key={date} value={date}>{date}</SelectItem>
                 ))}
@@ -2308,7 +2174,7 @@ function TransactionList({
         <div className="space-y-4 max-h-96 overflow-y-auto">
           {filteredTransactions.length === 0 ? (
             <p className="text-gray-500 text-center py-8">
-              {selectedDate === 'all' ? 'Henüz işlem bulunmuyor' : 'Bu tarihte işlem bulunmuyor'}
+              {selectedDate === 'all' ? t('app.noTransactions') : t('app.noTransactionsForDate')}
             </p>
           ) : (
             filteredTransactions.map(transaction => (
@@ -2320,8 +2186,8 @@ function TransactionList({
                       transaction.type === 'expense' ? 'destructive' : 
                       'secondary'
                     }>
-                      {transaction.type === 'income' ? 'Gelir' : 
-                       transaction.type === 'expense' ? 'Gider' : 'Transfer'}
+                      {transaction.type === 'income' ? t('app.income') : 
+                       transaction.type === 'expense' ? t('app.expense') : 'Transfer'}
                     </Badge>
                     {transaction.isRecurring && (
                       <Badge variant="outline" className="text-xs">
@@ -2371,10 +2237,18 @@ function TransactionList({
   )
 }
 
-function RecurringTransactionsList({ recurringTransactions }: { recurringTransactions: RecurringTransaction[] }) {
+function RecurringTransactionsList({ recurringTransactions, setRecurringTransactions, onEditRecurring }: { 
+  recurringTransactions: RecurringTransaction[]
+  setRecurringTransactions: React.Dispatch<React.SetStateAction<RecurringTransaction[]>>
+  onEditRecurring: (recurring: RecurringTransaction) => void
+}) {
+  const { t } = useLanguage()
   const toggleRecurring = (id: string) => {
-    // This would normally update the recurring transaction
-    console.log('Toggle recurring:', id)
+    setRecurringTransactions(prev => 
+      prev.map(r => 
+        r.id === id ? { ...r, isActive: !r.isActive } : r
+      )
+    )
   }
 
   return (
@@ -2382,13 +2256,13 @@ function RecurringTransactionsList({ recurringTransactions }: { recurringTransac
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Repeat className="h-5 w-5" />
-          Sabit Gelir ve Giderler
+          {t('app.recurringTransactions')}
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4 max-h-96 overflow-y-auto">
           {recurringTransactions.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">Henüz sabit işlem bulunmuyor</p>
+            <p className="text-gray-500 text-center py-8">{t('app.noRecurringTransactions')}</p>
           ) : (
             recurringTransactions.map(recurring => (
               <div key={recurring.id} className={`p-4 rounded-lg ${
@@ -2400,7 +2274,7 @@ function RecurringTransactionsList({ recurringTransactions }: { recurringTransac
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <Badge variant={recurring.type === 'income' ? 'default' : 'destructive'}>
-                        {recurring.type === 'income' ? 'Gelir' : 'Gider'}
+                        {recurring.type === 'income' ? t('app.income') : t('app.expense')}
                       </Badge>
                       <span className="font-medium">{recurring.category}</span>
                       {!recurring.isActive && (
@@ -2430,13 +2304,22 @@ function RecurringTransactionsList({ recurringTransactions }: { recurringTransac
                     }`}>
                       {recurring.type === 'income' ? '+' : '-'}₺{recurring.amount.toFixed(2)}
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => toggleRecurring(recurring.id)}
-                    >
-                      {recurring.isActive ? 'Pasif Et' : 'Aktif Et'}
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => toggleRecurring(recurring.id)}
+                      >
+                        {recurring.isActive ? 'Pasif Et' : 'Aktif Et'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onEditRecurring(recurring)}
+                      >
+                        Düzenle
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2449,6 +2332,7 @@ function RecurringTransactionsList({ recurringTransactions }: { recurringTransac
 }
 
 function DailyReports({ transactions }: { transactions: Transaction[] }) {
+  const { t } = useLanguage()
   const groupedTransactions = transactions.reduce((acc, transaction) => {
     const date = new Date(transaction.date).toLocaleDateString('tr-TR')
     if (!acc[date]) {
@@ -2467,18 +2351,18 @@ function DailyReports({ transactions }: { transactions: Transaction[] }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <BarChart3 className="h-5 w-5" />
-          Günlük Raporlar
+          {t('app.dailyReports')}
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-6 max-h-96 overflow-y-auto">
           {sortedDates.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">Henüz rapor bulunmuyor</p>
+            <p className="text-gray-500 text-center py-8">{t('app.noReports')}</p>
           ) : (
             sortedDates.map(date => {
               const dayTransactions = groupedTransactions[date]
-              const dayIncome = dayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
-              const dayExpense = dayTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+              const dayIncome = dayTransactions.filter(t => t.type === 'income').reduce((sum, transaction) => sum + transaction.amount, 0)
+              const dayExpense = dayTransactions.filter(t => t.type === 'expense').reduce((sum, transaction) => sum + transaction.amount, 0)
               const netAmount = dayIncome - dayExpense
 
               return (
