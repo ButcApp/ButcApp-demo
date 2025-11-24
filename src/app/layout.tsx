@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { AuthProvider } from "@/contexts/AuthContext";
+import PageTransition from "@/components/page-transition";
 
 // Font ayarları
 const geistSans = Geist({
@@ -57,11 +58,13 @@ export default function RootLayout({
           defaultTheme="light"
           enableSystem
           disableTransitionOnChange={false}
-          transitionDuration={800}
+          transitionDuration={300}
         >
           <AuthProvider>
             <LanguageProvider>
-              {children}
+              <PageTransition>
+                {children}
+              </PageTransition>
               <Toaster />
             </LanguageProvider>
           </AuthProvider>
