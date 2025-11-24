@@ -225,7 +225,7 @@ function SettingsContent() {
         if (avatarPath) {
           await supabase.storage
             .from('avatars')
-            .remove([`avatars/${avatarPath}`])
+            .remove([`${user?.id}/${avatarPath}`])
         }
       }
 
@@ -320,7 +320,7 @@ function SettingsContent() {
     try {
       const fileExt = file.name.split('.').pop()
       const fileName = `${user?.id}-${Date.now()}.${fileExt}`
-      const filePath = `avatars/${fileName}`
+      const filePath = `${user?.id}/${fileName}`
 
       // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage

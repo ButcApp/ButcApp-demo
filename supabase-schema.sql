@@ -104,6 +104,11 @@ VALUES (
 ) ON CONFLICT (id) DO NOTHING;
 
 -- Storage policies for avatars (bucket oluşturduktan sonra çalıştırın):
+DROP POLICY IF EXISTS "Users can upload own avatar" ON storage.objects;
+DROP POLICY IF EXISTS "Users can view own avatar" ON storage.objects;
+DROP POLICY IF EXISTS "Users can update own avatar" ON storage.objects;
+DROP POLICY IF EXISTS "Users can delete own avatar" ON storage.objects;
+
 CREATE POLICY "Users can upload own avatar"
   ON storage.objects FOR INSERT
   WITH CHECK (
@@ -153,6 +158,18 @@ CREATE POLICY "Users can manage own avatars"
     bucket_id = 'avatars' AND
     auth.role() = 'authenticated' AND
     (auth.uid()::text = (storage.foldername(name))[1] OR name LIKE auth.uid()::text || '%')
+  );
+
+-- Alternatif olarak daha basit policy (tüm authenticated kullanıcılar kendi avatarlarını yönetebilir):
+CREATE POLICY "Allow authenticated users to manage avatars"
+  ON storage.objects FOR ALL
+  USING (
+    bucket_id = 'avatars' AND 
+    auth.role() = 'authenticated'
+  )
+  WITH CHECK (
+    bucket_id = 'avatars' AND 
+    auth.role() = 'authenticated'
   );
 
 -- 8. Sample data structure for user_data
