@@ -24,11 +24,8 @@ interface RecurringTransaction {
   category: string
   description: string
   account: 'cash' | 'bank' | 'savings'
-  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'quarterly' | 'biannual'
-  dayOfMonth?: number
-  dayOfWeek?: number
-  weekOfMonth?: number
-  monthOfYear?: number
+  frequency: 'daily' | 'monthly' | 'yearly' | 'custom'
+  customFrequency?: string
   startDate: string
   endDate?: string
   isActive: boolean
@@ -54,18 +51,16 @@ export default function RecurringTransactionsList({
     description: '',
     account: 'cash',
     frequency: 'monthly',
-    dayOfMonth: 1,
+    customFrequency: '',
     startDate: new Date().toISOString().split('T')[0],
     isActive: true
   })
 
   const frequencyOptions = [
-    { value: 'daily', label: 'Her Gün', icon: Calendar },
-    { value: 'weekly', label: 'Haftalık', icon: Calendar },
+    { value: 'daily', label: 'Günlük', icon: Calendar },
     { value: 'monthly', label: 'Aylık', icon: Calendar },
-    { value: 'quarterly', label: '3 Aylık', icon: Calendar },
-    { value: 'biannual', label: '6 Aylık', icon: Calendar },
-    { value: 'yearly', label: 'Yıllık', icon: Calendar }
+    { value: 'yearly', label: 'Yıllık', icon: Calendar },
+    { value: 'custom', label: 'Diğer', icon: Calendar }
   ]
 
   const getFrequencyLabel = (frequency: string) => {
@@ -80,7 +75,6 @@ export default function RecurringTransactionsList({
     const currentYear = today.getFullYear()
     const currentMonth = today.getMonth()
     const currentDay = today.getDate()
-    const currentWeekDay = today.getDay() // 0 = Pazar, 1 = Pazartesi
 
     let nextDate = new Date()
 
@@ -88,42 +82,16 @@ export default function RecurringTransactionsList({
       case 'daily':
         nextDate = new Date(currentYear, currentMonth, currentDay + 1)
         break
-      case 'weekly':
-        if (recurring.dayOfWeek !== undefined) {
-          const daysUntilNext = (recurring.dayOfWeek - currentWeekDay + 7) % 7
-          nextDate = new Date(currentYear, currentMonth, currentDay + daysUntilNext)
-        }
-        break
       case 'monthly':
-        if (recurring.dayOfMonth !== undefined) {
-          if (recurring.dayOfMonth > currentDay) {
-            nextDate = new Date(currentYear, currentMonth, recurring.dayOfMonth)
-          } else {
-            nextDate = new Date(currentYear, currentMonth + 1, recurring.dayOfMonth)
-          }
-        }
-        break
-      case 'quarterly':
-        if (recurring.dayOfMonth !== undefined) {
-          const nextMonth = currentMonth + (currentMonth % 3 <= 2 ? 2 : 1)
-          nextDate = new Date(currentYear, nextMonth, recurring.dayOfMonth)
-        }
-        break
-      case 'biannual':
-        if (recurring.dayOfMonth !== undefined) {
-          const nextMonth = currentMonth + (currentMonth < 6 ? 6 : 0)
-          nextDate = new Date(currentYear + (currentMonth < 6 ? 0 : 1), nextMonth, recurring.dayOfMonth)
-        }
+        nextDate = new Date(currentYear, currentMonth + 1, currentDay)
         break
       case 'yearly':
-        if (recurring.monthOfYear !== undefined && recurring.dayOfMonth !== undefined) {
-          let nextYear = currentYear
-          if (recurring.monthOfYear < currentMonth || 
-              (recurring.monthOfYear === currentMonth && recurring.dayOfMonth <= currentDay)) {
-            nextYear++
-          }
-          nextDate = new Date(nextYear, recurring.monthOfYear - 1, recurring.dayOfMonth)
-        }
+        nextDate = new Date(currentYear + 1, currentMonth, currentDay)
+        break
+      case 'custom':
+        // Özel periyot için bir sonraki tarihi hesaplamak karmaşık olabilir
+        // Şimdilik bir ay sonraya ayarlayalım
+        nextDate = new Date(currentYear, currentMonth + 1, currentDay)
         break
       default:
         return null
@@ -133,6 +101,12 @@ export default function RecurringTransactionsList({
   }
 
   const addRecurringTransaction = () => {
+    // Validasyon
+    if (newTransaction.frequency === 'custom' && !newTransaction.customFrequency.trim()) {
+      alert('Özel periyot seçildiğinde periyot açıklaması zorunludur.')
+      return
+    }
+
     const id = Date.now().toString()
     const newRecurring: RecurringTransaction = {
       ...newTransaction,
@@ -149,7 +123,7 @@ export default function RecurringTransactionsList({
       description: '',
       account: 'cash',
       frequency: 'monthly',
-      dayOfMonth: 1,
+      customFrequency: '',
       startDate: new Date().toISOString().split('T')[0],
       isActive: true
     })
@@ -178,12 +152,10 @@ export default function RecurringTransactionsList({
 
   const formatFrequency = (recurring: RecurringTransaction) => {
     const labels = {
-      daily: 'Her Gün',
-      weekly: 'Haftalık',
+      daily: 'Günlük',
       monthly: 'Aylık',
-      quarterly: '3 Aylık',
-      biannual: '6 Aylık',
-      yearly: 'Yıllık'
+      yearly: 'Yıllık',
+      custom: recurring.customFrequency || 'Diğer'
     }
     return labels[recurring.frequency] || recurring.frequency
   }
@@ -314,6 +286,21 @@ export default function RecurringTransactionsList({
                   />
                 </div>
               </div>
+
+              {newTransaction.frequency === 'custom' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Özel Periyot
+                  </label>
+                  <input
+                    type="text"
+                    value={newTransaction.customFrequency}
+                    onChange={(e) => setNewTransaction(prev => ({ ...prev, customFrequency: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                    placeholder="Örn: 15 günde bir, 2 ayda bir"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">

@@ -15,11 +15,8 @@ interface RecurringTransaction {
   category: string
   description: string
   account: 'cash' | 'bank' | 'savings'
-  frequency: 'weekly' | 'monthly' | 'yearly'
-  dayOfWeek?: number  // Haftalık için (1-7, 1=Pazartesi)
-  dayOfMonth?: number  // Aylık için (1-31)
-  weekOfMonth?: number  // Aylık için (1-5) - ayın hangi haftası
-  monthOfYear?: number  // Yıllık için (1-12)
+  frequency: 'daily' | 'monthly' | 'yearly' | 'custom'
+  customFrequency?: string
   startDate: string
   endDate?: string
   isActive: boolean
@@ -41,6 +38,13 @@ export default function EditRecurringDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validasyon
+    if (formData.frequency === 'custom' && !formData.customFrequency?.trim()) {
+      alert('Özel periyot seçildiğinde periyot açıklaması zorunludur.')
+      return
+    }
+    
     onSave(formData)
   }
 
@@ -159,116 +163,33 @@ export default function EditRecurringDialog({
               </Label>
               <Select
                 value={formData.frequency}
-                onValueChange={(value: 'weekly' | 'monthly' | 'yearly') => handleChange('frequency', value)}
+                onValueChange={(value: 'daily' | 'monthly' | 'yearly' | 'custom') => handleChange('frequency', value)}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="weekly">Haftalık</SelectItem>
+                  <SelectItem value="daily">Günlük</SelectItem>
                   <SelectItem value="monthly">{t('app.monthly')}</SelectItem>
                   <SelectItem value="yearly">{t('app.yearly')}</SelectItem>
+                  <SelectItem value="custom">Diğer</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Gün - Haftalık için */}
-            {formData.frequency === 'weekly' && (
+            {/* Özel Periyot için */}
+            {formData.frequency === 'custom' && (
               <div>
                 <Label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Haftanın Günü *
-                </Label>
-                <Select
-                  value={formData.dayOfWeek?.toString()}
-                  onValueChange={(value: string) => handleChange('dayOfWeek', parseInt(value) || 1)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">Pazartesi</SelectItem>
-                    <SelectItem value="2">Pazartesi</SelectItem>
-                    <SelectItem value="3">Salı</SelectItem>
-                    <SelectItem value="4">Çarşamba</SelectItem>
-                    <SelectItem value="5">Perşembe</SelectItem>
-                    <SelectItem value="6">Cuma</SelectItem>
-                    <SelectItem value="7">Cumartesi</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {/* Gün - Aylık için */}
-            {formData.frequency === 'monthly' && (
-              <div>
-                <Label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  {t('app.dayOfMonth')} *
+                  Özel Periyot *
                 </Label>
                 <Input
-                  type="number"
-                  min="1"
-                  max="31"
-                  value={formData.dayOfMonth}
-                  onChange={(e) => handleChange('dayOfMonth', parseInt(e.target.value) || 1)}
-                  required
+                  type="text"
+                  value={formData.customFrequency || ''}
+                  onChange={(e) => handleChange('customFrequency', e.target.value)}
                   className="w-full"
-                  placeholder="1-31 arası gün"
+                  placeholder="Örn: 15 günde bir, 2 ayda bir"
                 />
-              </div>
-            )}
-
-            {/* Hafta - Aylık için */}
-            {formData.frequency === 'monthly' && (
-              <div>
-                <Label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Ayın Haftası *
-                </Label>
-                <Select
-                  value={formData.weekOfMonth?.toString()}
-                  onValueChange={(value: string) => handleChange('weekOfMonth', parseInt(value) || 1)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1. Hafta</SelectItem>
-                    <SelectItem value="2">2. Hafta</SelectItem>
-                    <SelectItem value="3">3. Hafta</SelectItem>
-                    <SelectItem value="4">4. Hafta</SelectItem>
-                    <SelectItem value="5">5. Hafta</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {/* Yıllık için ay seçimi */}
-            {formData.frequency === 'yearly' && (
-              <div>
-                <Label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Ay *
-                </Label>
-                <Select
-                  value={formData.monthOfYear?.toString()}
-                  onValueChange={(value) => handleChange('monthOfYear', parseInt(value))}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">Ocak</SelectItem>
-                    <SelectItem value="2">Şubat</SelectItem>
-                    <SelectItem value="3">Mart</SelectItem>
-                    <SelectItem value="4">Nisan</SelectItem>
-                    <SelectItem value="5">Mayıs</SelectItem>
-                    <SelectItem value="6">Haziran</SelectItem>
-                    <SelectItem value="7">Temmuz</SelectItem>
-                    <SelectItem value="8">Ağustos</SelectItem>
-                    <SelectItem value="9">Eylül</SelectItem>
-                    <SelectItem value="10">Ekim</SelectItem>
-                    <SelectItem value="11">Kasım</SelectItem>
-                    <SelectItem value="12">Aralık</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             )}
 
