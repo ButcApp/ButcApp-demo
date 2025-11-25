@@ -40,79 +40,100 @@ export default function CurrencyRatesWidget() {
       setLoading(true)
       setError('')
       
-      // Cache-busting timestamp ekle
-      const timestamp = new Date().getTime()
-      const response = await fetch(`/api/exchange-rates?refresh=true&t=${timestamp}`, {
-        cache: 'no-cache', // Browser cache'ini devre dışı bırak
+      // TCMB API'si ile doğrudan veri çek
+      const tcmbResponse = await fetch('https://www.tcmb.gov.tr/kurlar/today.xml', {
+        cache: 'no-cache',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
           'Expires': '0'
         }
       })
-      const data: CurrencyResponse = await response.json()
       
-      if (data.success && data.data) {
-        setRates(data.data)
-        setLastUpdate(data.lastUpdate || new Date().toLocaleString('tr-TR'))
+      if (!tcmbResponse.ok) {
+        throw new Error('TCMB API\'ye erişilemedi')
+      }
+      
+      const xmlText = await tcmbResponse.text()
+      
+      // XML parse et
+      const parser = new DOMParser()
+      const xmlDoc = parser.parseFromString(xmlText, 'text/xml')
+      
+      const currencyNodes = xmlDoc.getElementsByTagName('Currency')
+      const rates: ExchangeRate[] = []
+      
+      for (let i = 0; i < currencyNodes.length; i++) {
+        const currency = currencyNodes[i]
+        const code = currency.getAttribute('CurrencyCode')
+        const name = currency.getElementsByTagName('CurrencyName')[0]?.textContent || ''
+        const forexBuying = parseFloat(currency.getElementsByTagName('ForexBuying')[0]?.textContent || '0')
+        const forexSelling = parseFloat(currency.getElementsByTagName('ForexSelling')[0]?.textContent || '0')
         
-        if (data.message) {
-          setError(data.message)
+        if (code && forexBuying > 0 && forexSelling > 0) {
+          rates.push({
+            code,
+            name,
+            buyRate: forexBuying,
+            sellRate: forexSelling,
+            changeRate: 0, // TCMB anlık değişim sağlamıyor
+            changePercent: 0,
+            lastUpdate: new Date().toLocaleString('tr-TR'),
+            flag: getCurrencyFlag(code)
+          })
         }
+      }
+      
+      if (rates.length > 0) {
+        setRates(rates)
+        setLastUpdate(new Date().toLocaleString('tr-TR'))
       } else {
         throw new Error('Döviz kurları alınamadı')
       }
     } catch (err) {
       setError('Döviz kurları yüklenemedi')
       console.error('Döviz kuru hatası:', err)
+      setRates([])
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => {
-    // İlk yüklemede normal fetch (cache'den alabilir)
-    const initialFetch = async () => {
-      try {
-        setLoading(true)
-        setError('')
-        
-        // Cache-busting timestamp ekle
-        const timestamp = new Date().getTime()
-        const response = await fetch(`/api/exchange-rates?t=${timestamp}`, {
-          cache: 'no-cache', // Browser cache'ini devre dışı bırak
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-          }
-        })
-        const data: CurrencyResponse = await response.json()
-        
-        if (data.success && data.data) {
-          setRates(data.data)
-          setLastUpdate(data.lastUpdate || new Date().toLocaleString('tr-TR'))
-          
-          if (data.message) {
-            setError(data.message)
-          }
-        } else {
-          throw new Error('Döviz kurları alınamadı')
-        }
-      } catch (err) {
-        setError('Döviz kurları yüklenemedi')
-        console.error('Döviz kuru hatası:', err)
-      } finally {
-        setLoading(false)
-      }
+  // Bayrak emoji'leri için yardımcı fonksiyon
+  const getCurrencyFlag = (code: string): string => {
+    const flags: { [key: string]: string } = {
+      'USD': '🇺🇸',
+      'EUR': '🇪🇺',
+      'GBP': '🇬🇧',
+      'CHF': '🇨🇭',
+      'SEK': '🇸🇪',
+      'NOK': '🇳🇴',
+      'DKK': '🇩🇰',
+      'CAD': '🇨🇦',
+      'AUD': '🇦🇺',
+      'JPY': '🇯🇵',
+      'SAR': '🇸🇦',
+      'KWD': '🇰🇼',
+      'AED': '🇦🇪',
+      'BGN': '🇧🇬',
+      'RON': '🇷🇴',
+      'RUB': '🇷🇺',
+      'IRR': '🇮🇷',
+      'CNY': '🇨🇳',
+      'PKR': '🇵🇰',
+      'QAR': '🇶🇦',
+      'XAU': '🏆',
+      'XAG': '🥈'
     }
+    return flags[code] || '💱'
+  }
 
-    initialFetch()
+  useEffect(() => {
+    // İlk yüklemede TCMB'den veri çek
+    fetchRates()
     
     // Her 10 dakikada bir güncelle
-    const interval = fetchRates
-    
-    const intervalId = setInterval(interval, 10 * 60 * 1000)
+    const intervalId = setInterval(fetchRates, 10 * 60 * 1000)
     
     return () => clearInterval(intervalId)
   }, [])
