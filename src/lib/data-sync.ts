@@ -208,18 +208,19 @@ export const dataSync = {
       // Mevcut işlemleri getir
       const existingTransactions = await this.getTransactions()
       
-      // Aynı ID'ye sahip işlem var mı kontrol et
+      // Aynı ID'ye sahip işlem var mı kontrol et (daha spesifik kontrol)
       const duplicateTransaction = existingTransactions.find(t => 
         t.id === transaction.id || 
         (t.type === transaction.type && 
          t.amount === transaction.amount && 
          t.category === transaction.category && 
          t.account === transaction.account && 
-         t.date === transaction.date)
+         t.date === transaction.date &&
+         t.description === transaction.description)
       )
 
       if (duplicateTransaction) {
-        console.error('Duplicate transaction found, not adding:', transaction)
+        console.log('Duplicate transaction found, not adding:', transaction)
         return false
       }
 
@@ -389,19 +390,19 @@ export const dataSync = {
         return []
       }
 
-      // Try server-side API first (more reliable)
-      try {
-        const response = await fetch(`/api/notes?userId=${userId}`)
-        if (response.ok) {
-          const result = await response.json()
-          if (result.success) {
-            console.log('Notes retrieved via API:', result.data?.length || 0)
-            return result.data || []
-          }
-        }
-      } catch (apiError) {
-        console.log('API call failed, falling back to client-side:', apiError)
-      }
+      // API routes removed for static export - use client-side only
+      // try {
+      //   const response = await fetch(`/api/notes?userId=${userId}`)
+      //   if (response.ok) {
+      //     const result = await response.json()
+      //     if (result.success) {
+      //       console.log('Notes retrieved via API:', result.data?.length || 0)
+      //       return result.data || []
+      //     }
+      //   }
+      // } catch (apiError) {
+      //   console.log('API call failed, falling back to client-side:', apiError)
+      // }
 
       // Fallback to client-side Supabase
       const { data, error } = await supabase
@@ -519,19 +520,19 @@ export const dataSync = {
         return []
       }
 
-      // Try server-side API first (more reliable)
-      try {
-        const response = await fetch(`/api/currency-investments?userId=${userId}`)
-        if (response.ok) {
-          const result = await response.json()
-          if (result.success) {
-            console.log('Currency investments retrieved via API:', result.data?.length || 0)
-            return result.data || []
-          }
-        }
-      } catch (apiError) {
-        console.log('API call failed, falling back to client-side:', apiError)
-      }
+      // API routes removed for static export - use client-side only
+      // try {
+      //   const response = await fetch(`/api/currency-investments?userId=${userId}`)
+      //   if (response.ok) {
+      //     const result = await response.json()
+      //     if (result.success) {
+      //       console.log('Currency investments retrieved via API:', result.data?.length || 0)
+      //       return result.data || []
+      //     }
+      //   }
+      // } catch (apiError) {
+      //   console.log('API call failed, falling back to client-side:', apiError)
+      // }
 
       // Fallback to client-side Supabase - read from 'accounts' data type
       const { data, error } = await supabase
@@ -577,21 +578,21 @@ export const dataSync = {
 
       console.log('Deleting currency investment:', investmentId)
 
-      // Try server-side API first (more reliable)
-      try {
-        const response = await fetch(`/api/currency-investments?userId=${userId}&investmentId=${investmentId}`, {
-          method: 'DELETE'
-        })
-        if (response.ok) {
-          const result = await response.json()
-          if (result.success) {
-            console.log('Currency investment successfully deleted via API')
-            return true
-          }
-        }
-      } catch (apiError) {
-        console.log('API call failed, falling back to client-side:', apiError)
-      }
+      // API routes removed for static export - use client-side only
+      // try {
+      //   const response = await fetch(`/api/currency-investments?userId=${userId}&investmentId=${investmentId}`, {
+      //     method: 'DELETE'
+      //   })
+      //   if (response.ok) {
+      //     const result = await response.json()
+      //     if (result.success) {
+      //       console.log('Currency investment successfully deleted via API')
+      //       return true
+      //     }
+      //   }
+      // } catch (apiError) {
+      //   console.log('API call failed, falling back to client-side:', apiError)
+      // }
 
       // Fallback to client-side Supabase
       // Mevcut yatırımları getir
