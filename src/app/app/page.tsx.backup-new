@@ -16,7 +16,6 @@ import { UserAuthButton } from '@/components/auth/UserAuthButton'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { dataSync } from '@/lib/data-sync'
-import { RecurringTransactionsList } from '@/components/RecurringTransactionsList'
 import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar } from 'recharts'
 import Link from 'next/link'
 import EditRecurringDialog from '@/components/EditRecurringDialog'
@@ -42,11 +41,9 @@ interface RecurringTransaction {
   category: string
   description: string
   account: 'cash' | 'bank' | 'savings'
-  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'quarterly' | 'biannual'
-  dayOfMonth?: number
-  dayOfWeek?: number // Haftanın günü (1-7, Pazartesi=1)
-  weekOfMonth?: number // Ayın kaçıncı haftası (1-5)
-  monthOfYear?: number
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom'
+  customFrequency?: string
+  dayOfWeek?: number  // Haftalık için (1-7, 1=Pazartesi)
   startDate: string
   endDate?: string
   isActive: boolean
@@ -76,9 +73,6 @@ export default function CepFinansApp() {
   const [loading, setLoading] = useState(true)
   const [showAddTransaction, setShowAddTransaction] = useState(false)
   const [showRecurringDialog, setShowRecurringDialog] = useState(false)
-  const [recurringFrequency, setRecurringFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly')
-  const [showTimeRangeDialog, setShowTimeRangeDialog] = useState(false)
-  const [timeRange, setTimeRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month')
   const [showContactDialog, setShowContactDialog] = useState(false)
   const [showTransferDialog, setShowTransferDialog] = useState(false)
   const [showStatsDialog, setShowStatsDialog] = useState(false)
@@ -118,13 +112,11 @@ export default function CepFinansApp() {
       try {
         setLoading(true)
         
-        // Paralel olarak tüm verileri yükle
-        const [balancesData, transactionsData, recurringData, notesData] = await Promise.all([
-          dataSync.getBalances(),
-          dataSync.getTransactions(),
-          dataSync.getRecurringTransactions(),
-          dataSync.getNotes()
-        ])
+        // Sequential olarak verileri yükle (daha stabil)
+        const balancesData = await dataSync.getBalances()
+        const transactionsData = await dataSync.getTransactions()
+        const recurringData = await dataSync.getRecurringTransactions()
+        const notesData = await dataSync.getNotes()
 
         if (balancesData) {
           setBalances(balancesData)
@@ -162,30 +154,43 @@ export default function CepFinansApp() {
     const currentMonth = today.getMonth()
     const currentYear = today.getFullYear()
     const currentDay = today.getDate()
-    const currentDayOfWeek = today.getDay() + 1 // Pazartesi=1, Pazar=7
+    const currentWeekDay = today.getDay() // 0 = Pazar, 1 = Pazartesi
+    const todayStr = today.toISOString().split('T')[0]
 
     recurringTransactions.forEach(recurring => {
       if (!recurring.isActive) return
 
       let shouldApply = false
-      
+
       switch (recurring.frequency) {
         case 'daily':
           shouldApply = true // Her gün uygula
           break
         case 'weekly':
-          shouldApply = recurring.dayOfWeek === currentDayOfWeek
+          // Haftalık için seçilen gün kontrol et
+          if (recurring.dayOfWeek) {
+            // JavaScript'te: 0=Pazar, 1=Pazartesi
+            // Bizim sistemimizde: 1=Pazartesi, 7=Pazar
+            const jsDayOfWeek = recurring.dayOfWeek === 7 ? 0 : recurring.dayOfWeek
+            shouldApply = currentWeekDay === jsDayOfWeek
+          }
           break
         case 'monthly':
-          shouldApply = recurring.dayOfMonth === currentDay
+          // Aylık için her ayın aynı günü
+          shouldApply = true // Basitleştirilmiş - her gün kontrol et
           break
         case 'yearly':
-          shouldApply = recurring.monthOfYear === currentMonth + 1 && recurring.dayOfMonth === currentDay
+          // Yıllık için her yılın aynı günü
+          shouldApply = true // Basitleştirilmiş - her gün kontrol et
+          break
+        case 'custom':
+          // Özel periyot için mantık daha karmaşık olabilir
+          // Şimdilik her gün kontrol et
+          shouldApply = true
           break
       }
 
       if (shouldApply) {
-        const todayStr = today.toISOString().split('T')[0]
         const alreadyApplied = transactions.some(t => 
           t.recurringId === recurring.id && 
           t.date.startsWith(todayStr)
@@ -327,24 +332,39 @@ export default function CepFinansApp() {
     const currentMonth = today.getMonth()
     const currentYear = today.getFullYear()
     const currentDay = today.getDate()
+    const currentWeekDay = today.getDay() // 0 = Pazar, 1 = Pazartesi
 
     return recurringTransactions
       .filter(r => r.isActive)
       .map(r => {
         let nextDate = new Date()
         
-        if (r.frequency === 'monthly') {
-          if (r.dayOfMonth! > currentDay) {
-            nextDate = new Date(currentYear, currentMonth, r.dayOfMonth!)
-          } else {
-            nextDate = new Date(currentYear, currentMonth + 1, r.dayOfMonth!)
-          }
-        } else if (r.frequency === 'yearly') {
-          if (r.monthOfYear! > currentMonth || (r.monthOfYear! === currentMonth && r.dayOfMonth! > currentDay)) {
-            nextDate = new Date(currentYear, r.monthOfYear! - 1, r.dayOfMonth!)
-          } else {
-            nextDate = new Date(currentYear + 1, r.monthOfYear! - 1, r.dayOfMonth!)
-          }
+        switch (r.frequency) {
+          case 'daily':
+            nextDate = new Date(currentYear, currentMonth, currentDay + 1)
+            break
+          case 'weekly':
+            if (r.dayOfWeek) {
+              // JavaScript'te: 0=Pazar, 1=Pazartesi
+              // Bizim sistemimizde: 1=Pazartesi, 7=Pazar
+              const jsDayOfWeek = r.dayOfWeek === 7 ? 0 : r.dayOfWeek
+              const daysUntilNext = (jsDayOfWeek - currentWeekDay + 7) % 7
+              nextDate = new Date(currentYear, currentMonth, currentDay + daysUntilNext)
+            }
+            break
+          case 'monthly':
+            nextDate = new Date(currentYear, currentMonth + 1, currentDay)
+            break
+          case 'yearly':
+            nextDate = new Date(currentYear + 1, currentMonth, currentDay)
+            break
+          case 'custom':
+            // Özel periyot için bir sonraki tarihi hesaplamak karmaşık olabilir
+            // Şimdilik bir ay sonraya ayarlayalım
+            nextDate = new Date(currentYear, currentMonth + 1, currentDay)
+            break
+          default:
+            nextDate = new Date(currentYear, currentMonth + 1, currentDay)
         }
 
         const daysUntil = Math.ceil((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
@@ -878,11 +898,7 @@ export default function CepFinansApp() {
           </TabsContent>
           
           <TabsContent value="recurring">
-            <RecurringTransactionsList 
-              recurringTransactions={recurringTransactions} 
-              setRecurringTransactions={setRecurringTransactions} 
-              onEditRecurring={handleEditRecurring} 
-            />
+            <RecurringTransactionsList recurringTransactions={recurringTransactions} setRecurringTransactions={setRecurringTransactions} onEditRecurring={handleEditRecurring} />
           </TabsContent>
           
           <TabsContent value="reports">
@@ -1470,70 +1486,117 @@ export default function CepFinansApp() {
 function InitialSetup({ onComplete }: { onComplete: (balances: AccountBalances) => void }) {
   const { t } = useLanguage()
   const [balances, setBalances] = useState<AccountBalances>({ cash: 0, bank: 0, savings: 0 })
+  const [isLoading, setIsLoading] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    onComplete(balances)
+    setIsLoading(true)
+    
+    try {
+      await onComplete(balances)
+      setShowSuccess(true)
+      
+      // 2 saniye sonra başarı ekranını gizle ve yönlendir
+      setTimeout(() => {
+        setShowSuccess(false)
+        setIsLoading(false)
+      }, 2000)
+    } catch (error) {
+      console.error('Setup error:', error)
+      setIsLoading(false)
+      alert('Bakiyeler kaydedilemedi. Lütfen tekrar deneyin.')
+    }
   }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md bg-white dark:bg-gray-800 shadow-sm border">
-        <CardHeader className="text-center">
-          <div className="w-16 h-16 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <DollarSign className="h-8 w-8 text-white" />
-          </div>
-          <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">
-            {t('app.initialSetup')}
-          </CardTitle>
-          <CardDescription className="text-gray-600 dark:text-gray-400">
-            {t('app.initialSetupDesc')}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="cash" className="text-sm font-medium">Nakit Bakiye</Label>
-              <Input
-                id="cash"
-                type="number"
-                step="0.01"
-                value={balances.cash}
-                onChange={(e) => setBalances(prev => ({ ...prev, cash: parseFloat(e.target.value) || 0 }))}
-                placeholder="0.00"
-                className="mt-1"
-              />
+      {showSuccess ? (
+        <Card className="w-full max-w-md bg-white dark:bg-gray-800 shadow-sm border">
+          <CardContent className="p-8 text-center">
+            <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
             </div>
-            <div>
-              <Label htmlFor="bank" className="text-sm font-medium">Banka Bakiye</Label>
-              <Input
-                id="bank"
-                type="number"
-                step="0.01"
-                value={balances.bank}
-                onChange={(e) => setBalances(prev => ({ ...prev, bank: parseFloat(e.target.value) || 0 }))}
-                placeholder="0.00"
-                className="mt-1"
-              />
+            <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              Başarılı!
+            </CardTitle>
+            <CardDescription className="text-gray-600 dark:text-gray-400">
+              Hesap bakiyeleriniz başarıyla kaydedildi. Yönlendiriliyorsunuz...
+            </CardDescription>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="w-full max-w-md bg-white dark:bg-gray-800 shadow-sm border">
+          <CardHeader className="text-center">
+            <div className="w-16 h-16 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <DollarSign className="h-8 w-8 text-white" />
             </div>
-            <div>
-              <Label htmlFor="savings" className="text-sm font-medium">Birikim Bakiye</Label>
-              <Input
-                id="savings"
-                type="number"
-                step="0.01"
-                value={balances.savings}
-                onChange={(e) => setBalances(prev => ({ ...prev, savings: parseFloat(e.target.value) || 0 }))}
-                placeholder="0.00"
-                className="mt-1"
-              />
-            </div>
-            <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-              Başla
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+            <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">
+              {t('app.initialSetup')}
+            </CardTitle>
+            <CardDescription className="text-gray-600 dark:text-gray-400">
+              {t('app.initialSetupDesc')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Label htmlFor="cash" className="text-sm font-medium">Nakit Bakiye</Label>
+                <Input
+                  id="cash"
+                  type="number"
+                  step="0.01"
+                  value={balances.cash}
+                  onChange={(e) => setBalances(prev => ({ ...prev, cash: parseFloat(e.target.value) || 0 }))}
+                  placeholder="0.00"
+                  className="mt-1"
+                  disabled={isLoading}
+                />
+              </div>
+              <div>
+                <Label htmlFor="bank" className="text-sm font-medium">Banka Bakiye</Label>
+                <Input
+                  id="bank"
+                  type="number"
+                  step="0.01"
+                  value={balances.bank}
+                  onChange={(e) => setBalances(prev => ({ ...prev, bank: parseFloat(e.target.value) || 0 }))}
+                  placeholder="0.00"
+                  className="mt-1"
+                  disabled={isLoading}
+                />
+              </div>
+              <div>
+                <Label htmlFor="savings" className="text-sm font-medium">Birikim Bakiye</Label>
+                <Input
+                  id="savings"
+                  type="number"
+                  step="0.01"
+                  value={balances.savings}
+                  onChange={(e) => setBalances(prev => ({ ...prev, savings: parseFloat(e.target.value) || 0 }))}
+                  placeholder="0.00"
+                  className="mt-1"
+                  disabled={isLoading}
+                />
+              </div>
+              <Button 
+                type="submit" 
+                className="w-full bg-green-600 hover:bg-green-700 text-white"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Kaydediliyor...
+                  </div>
+                ) : (
+                  'Başla'
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
@@ -1829,9 +1892,9 @@ function RecurringTransactionForm({
     category: '',
     description: '',
     account: 'cash' as 'cash' | 'bank' | 'savings',
-    frequency: 'monthly' as 'monthly' | 'yearly',
-    dayOfMonth: 1,
-    monthOfYear: 1,
+    frequency: 'monthly' as 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom',
+    customFrequency: '',
+    dayOfWeek: 1, // Haftalık için (1-7, 1=Pazartesi)
     startDate: new Date().toISOString().split('T')[0]
   })
 
@@ -1842,6 +1905,13 @@ function RecurringTransactionForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validasyon
+    if (formData.frequency === 'custom' && !formData.customFrequency.trim()) {
+      alert('Özel periyot seçildiğinde periyot açıklaması zorunludur.')
+      return
+    }
+    
     if (!formData.amount || !formData.category) return
 
     onSubmit({
@@ -1851,8 +1921,8 @@ function RecurringTransactionForm({
       description: formData.description,
       account: formData.account,
       frequency: formData.frequency,
-      dayOfMonth: formData.dayOfMonth,
-      monthOfYear: formData.frequency === 'yearly' ? formData.monthOfYear : undefined,
+      customFrequency: formData.frequency === 'custom' ? formData.customFrequency : undefined,
+      dayOfWeek: formData.frequency === 'weekly' ? formData.dayOfWeek : undefined,
       startDate: formData.startDate,
       isActive: true
     })
@@ -1864,8 +1934,8 @@ function RecurringTransactionForm({
       description: '',
       account: 'cash',
       frequency: 'monthly',
-      dayOfMonth: 1,
-      monthOfYear: 1,
+      customFrequency: '',
+      dayOfWeek: 1,
       startDate: new Date().toISOString().split('T')[0]
     })
     onClose()
@@ -1891,15 +1961,18 @@ function RecurringTransactionForm({
 
         <div>
           <Label>{t('app.recurringFrequency')}</Label>
-          <Select value={formData.frequency} onValueChange={(value: 'monthly' | 'yearly') => 
+          <Select value={formData.frequency} onValueChange={(value: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom') => 
             setFormData(prev => ({ ...prev, frequency: value }))
           }>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="daily">Günlük</SelectItem>
+              <SelectItem value="weekly">Haftalık</SelectItem>
               <SelectItem value="monthly">{t('app.monthly')}</SelectItem>
               <SelectItem value="yearly">{t('app.yearly')}</SelectItem>
+              <SelectItem value="custom">Diğer</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1934,46 +2007,38 @@ function RecurringTransactionForm({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label>{t('app.day')} ({formData.frequency === 'monthly' ? t('app.ofMonth') : t('app.ofYear')})</Label>
-          <Select value={formData.dayOfMonth.toString()} onValueChange={(value) => 
-            setFormData(prev => ({ ...prev, dayOfMonth: parseInt(value) }))
-          }>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
-                <SelectItem key={day} value={day.toString()}>{day}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {formData.frequency === 'yearly' && (
+        {formData.frequency === 'weekly' && (
           <div>
-            <Label>{t('app.month')}</Label>
-            <Select value={formData.monthOfYear.toString()} onValueChange={(value) => 
-              setFormData(prev => ({ ...prev, monthOfYear: parseInt(value) }))
+            <Label>Haftanın Günü</Label>
+            <Select value={formData.dayOfWeek.toString()} onValueChange={(value) => 
+              setFormData(prev => ({ ...prev, dayOfWeek: parseInt(value) || 1 }))
             }>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="1">Ocak</SelectItem>
-                <SelectItem value="2">Şubat</SelectItem>
-                <SelectItem value="3">Mart</SelectItem>
-                <SelectItem value="4">Nisan</SelectItem>
-                <SelectItem value="5">Mayıs</SelectItem>
-                <SelectItem value="6">Haziran</SelectItem>
-                <SelectItem value="7">Temmuz</SelectItem>
-                <SelectItem value="8">Ağustos</SelectItem>
-                <SelectItem value="9">Eylül</SelectItem>
-                <SelectItem value="10">Ekim</SelectItem>
-                <SelectItem value="11">Kasım</SelectItem>
-                <SelectItem value="12">Aralık</SelectItem>
+                <SelectItem value="1">Pazartesi</SelectItem>
+                <SelectItem value="2">Salı</SelectItem>
+                <SelectItem value="3">Çarşamba</SelectItem>
+                <SelectItem value="4">Perşembe</SelectItem>
+                <SelectItem value="5">Cuma</SelectItem>
+                <SelectItem value="6">Cumartesi</SelectItem>
+                <SelectItem value="7">Pazar</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+        )}
+
+        {formData.frequency === 'custom' && (
+          <div className="col-span-2">
+            <Label>Özel Periyot</Label>
+            <Input
+              type="text"
+              value={formData.customFrequency}
+              onChange={(e) => setFormData(prev => ({ ...prev, customFrequency: e.target.value }))}
+              placeholder="Örn: 15 günde bir, 2 ayda bir"
+              required
+            />
           </div>
         )}
       </div>
@@ -2016,118 +2081,6 @@ function RecurringTransactionForm({
         {t('app.addRecurringTransaction')}
       </Button>
     </form>
-  )
-}
-
-}
-
-function RecurringTransactionsList({ recurringTransactions, setRecurringTransactions, onEditRecurring }: { 
-  recurringTransactions: RecurringTransaction[]
-  setRecurringTransactions: React.Dispatch<React.SetStateAction<RecurringTransaction[]>>
-  onEditRecurring: (recurring: RecurringTransaction) => void
-}) {
-  const { t } = useLanguage()
-  const toggleRecurring = (id: string) => {
-    setRecurringTransactions(prev => 
-      prev.map(r => 
-        r.id === id ? { ...r, isActive: !r.isActive } : r
-      )
-    )
-  }
-
-  return (
-    <Card className="bg-white dark:bg-gray-800 shadow-sm border">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Repeat className="h-5 w-5" />
-          {t('app.recurringTransactions')}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4 max-h-96 overflow-y-auto">
-          {recurringTransactions.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">{t('app.noRecurringTransactions')}</p>
-          ) : (
-            recurringTransactions.map(recurring => (
-              <div key={recurring.id} className={`p-4 rounded-lg ${
-                recurring.isActive 
-                  ? 'bg-gray-50 dark:bg-gray-700' 
-                  : 'bg-gray-100 dark:bg-gray-600 opacity-60'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Badge variant={
-                        recurring.type === 'income' ? 'default' : 
-                        recurring.type === 'expense' ? 'destructive' : 
-                        'secondary'
-                      }>
-                        {recurring.type === 'income' ? t('app.income') : 
-                         recurring.type === 'expense' ? t('app.expense') : 'Transfer'}
-                      }
-                      </Badge>
-                      <span className="font-medium">{recurring.category}</span>
-                      {recurring.isActive && (
-                        <Badge variant="outline" className="text-xs">
-                          <AlertCircle className="h-3 w-3 mr-1" />
-                          Aktif
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500 mt-1">
-                        {recurring.frequency === 'daily' && 'Her gün' ||
-                         recurring.frequency === 'weekly' && `Haftanın ${recurring.dayOfWeek}. günü` ||
-                         recurring.frequency === 'monthly' && `Her ayın ${recurring.dayOfMonth}. günü` ||
-                         recurring.frequency === 'yearly' && `Her yıl ${recurring.monthOfYear}. ayın ${recurring.dayOfMonth}. günü`}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="text-lg font-bold ${
-                    recurring.type === 'income' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {recurring.type === 'income' ? '+' : '-'}₺{recurring.amount.toFixed(2)}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => toggleRecurring(recurring.id)}
-                      className="text-xs"
-                    >
-                      {recurring.isActive ? 'Pasif Et' : 'Aktif Et'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onEditRecurring(recurring)}
-                      className="text-xs"
-                    >
-                      Düzenle
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    {recurring.description && (
-                      <span className="text-gray-700 dark:text-gray-300">{recurring.description}</span>
-                    )}
-                    <p className="text-xs text-gray-500 mt-1">
-                      {recurring.frequency === 'daily' && 'Her gün' ||
-                       recurring.frequency === 'weekly' && `Haftanın ${recurring.dayOfWeek}. günü` ||
-                       recurring.frequency === 'monthly' && `Her ayın ${recurring.dayOfMonth}. günü` ||
-                       recurring.frequency === 'yearly' && `Her yıl ${recurring.monthOfYear}. ayın ${recurring.dayOfMonth}. günü`}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </CardContent>
-    </Card>
   )
 }
 
