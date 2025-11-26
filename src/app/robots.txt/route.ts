@@ -1,37 +1,16 @@
 import { NextResponse } from 'next/server'
 
 export function GET() {
-  const robots = `# ButcApp.com Robots.txt
-# Generated: ${new Date().toISOString()}
-
-User-agent: *
+  const robots = `User-agent: *
 Allow: /
 
 # Sitemap konumu
 Sitemap: https://butcapp.com/sitemap.xml
 
-# Crawl delay (sunucuyu yormamak için)
-Crawl-delay: 1
-
-# Özel kurallar
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-# Sadece API'leri engelle (güvenlik için)
-User-agent: *
+# Sadece API'leri engelle
 Disallow: /api/
 Disallow: /_next/
-Disallow: /admin/login
-Disallow: /*.json$
-
-# Cache control
-# Allow caching of static assets
-Allow: /_next/static/
-Allow: /favicon.ico
-Allow: /og-image.png`
+Disallow: /admin/`
 
   return new NextResponse(robots, {
     status: 200,
