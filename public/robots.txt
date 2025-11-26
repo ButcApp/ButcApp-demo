@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# Sitemap konumu
+Sitemap: https://butcapp.com/sitemap.xml
+
+# Sadece API'leri engelle
+Disallow: /api/
+Disallow: /_next/
+Disallow: /admin/
