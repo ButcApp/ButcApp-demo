@@ -14,12 +14,12 @@ export function PieChart({ investments }: PieChartProps) {
     // Group investments by currency and calculate total value
     const currencyGroups = investments.reduce((acc, investment) => {
       const currency = investment.currency
-      const totalValue = investment.amount * investment.currentValue
+      const totalValue = investment.amount * investment.current_value
       
       if (!acc[currency]) {
         acc[currency] = {
           currency,
-          name: investment.currencyName,
+          name: investment.currency_name,
           value: 0,
           count: 0
         }

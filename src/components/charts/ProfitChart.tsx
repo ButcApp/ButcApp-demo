@@ -29,12 +29,12 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
 
     // Sort by buy date
     const sortedInvestments = [...filteredInvestments].sort((a, b) => 
-      new Date(a.buyDate).getTime() - new Date(b.buyDate).getTime()
+      new Date(a.buy_date).getTime() - new Date(b.buy_date).getTime()
     )
 
     // Calculate cumulative data
-    const totalInvestment = sortedInvestments.reduce((sum, inv) => sum + (inv.amount * inv.buyPrice), 0)
-    const currentValue = sortedInvestments.reduce((sum, inv) => sum + (inv.amount * inv.currentValue), 0)
+    const totalInvestment = sortedInvestments.reduce((sum, inv) => sum + (inv.amount * inv.buy_price), 0)
+    const currentValue = sortedInvestments.reduce((sum, inv) => sum + (inv.amount * inv.current_value), 0)
     const totalProfit = currentValue - totalInvestment
     const profitPercentage = totalInvestment > 0 ? (totalProfit / totalInvestment) * 100 : 0
 
@@ -135,8 +135,8 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
 
             {/* Bars */}
             {chartData.investments.map((investment, index) => {
-              const buyValue = investment.amount * investment.buyPrice
-              const currentValue = investment.amount * investment.currentValue
+              const buyValue = investment.amount * investment.buy_price
+              const currentValue = investment.amount * investment.current_value
               const profit = currentValue - buyValue
               
               const buyHeight = buyValue * scale
@@ -264,17 +264,17 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
       <div className="space-y-3">
         <h3 className="font-semibold text-lg">Yatırım Detayları</h3>
         {chartData.investments.map((investment) => {
-          const buyValue = investment.amount * investment.buyPrice
-          const currentValue = investment.amount * investment.currentValue
+          const buyValue = investment.amount * investment.buy_price
+          const currentValue = investment.amount * investment.current_value
           const profit = currentValue - buyValue
           const profitPercentage = buyValue > 0 ? (profit / buyValue) * 100 : 0
           
           return (
             <div key={investment.id} className="flex items-center justify-between p-3 border rounded-lg">
               <div className="flex-1">
-                <div className="font-medium">{investment.currency} - {investment.currencyName}</div>
+                <div className="font-medium">{investment.currency} - {investment.currency_name}</div>
                 <div className="text-sm text-muted-foreground">
-                  Alış: {new Date(investment.buyDate).toLocaleDateString('tr-TR')} • {investment.amount} adet
+                  Alış: {new Date(investment.buy_date).toLocaleDateString('tr-TR')} • {investment.amount} adet
                 </div>
               </div>
               
