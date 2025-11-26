@@ -9,10 +9,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { TrendingUp, TrendingDown, DollarSign, Bitcoin, Gem, ArrowUpRight, ArrowDownRight, Activity, BarChart3, RefreshCw, Clock, Star, AlertCircle, Plus, Calendar, Zap, Target, Wallet } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Bitcoin, Gem, ArrowUpRight, ArrowDownRight, Activity, BarChart3, RefreshCw, Clock, Star, AlertCircle, Plus, Calendar, Zap, Target, Wallet, PieChart as PieChartIcon, TrendingUp as TrendingUpIcon } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { LanguageToggle } from '@/components/language-toggle'
 import { UserAuthButton } from '@/components/auth/UserAuthButton'
+import { PieChart } from '@/components/charts/PieChart'
+import { ProfitChart } from '@/components/charts/ProfitChart'
 import { useLanguage } from '@/contexts/LanguageContext'
 import Link from 'next/link'
 
@@ -92,6 +94,11 @@ export default function InvestmentsPage() {
   const [isCreatingInvestment, setIsCreatingInvestment] = useState(false)
   const [historicalPrice, setHistoricalPrice] = useState<number | null>(null)
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(false)
+  
+  // Statistics states
+  const [showStatisticsDialog, setShowStatisticsDialog] = useState(false)
+  const [selectedChartType, setSelectedChartType] = useState<'pie' | 'profit'>('pie')
+  const [selectedCurrencyForChart, setSelectedCurrencyForChart] = useState<string>('all')
 
   // TCMB'den döviz verilerini çek
   const fetchCurrencyData = async () => {
@@ -808,13 +815,26 @@ export default function InvestmentsPage() {
         <div className="container mx-auto px-4 py-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Wallet className="w-5 h-5" />
-                Yatırımlarınız
-              </CardTitle>
-              <CardDescription>
-                Yaptığınız döviz yatırımlarınızın takibi
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Wallet className="w-5 h-5" />
+                    Yatırımlarınız
+                  </CardTitle>
+                  <CardDescription>
+                    Yaptığınız döviz yatırımlarınızın takibi
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowStatisticsDialog(true)}
+                  className="flex items-center gap-2"
+                >
+                  <PieChartIcon className="w-4 h-4" />
+                  İstatistikler
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4 max-h-96 overflow-y-auto">
@@ -846,6 +866,115 @@ export default function InvestmentsPage() {
           </Card>
         </div>
       )}
+
+      {/* Statistics Dialog */}
+      <Dialog open={showStatisticsDialog} onOpenChange={setShowStatisticsDialog}>
+        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart3 className="w-5 h-5" />
+              Yatırım İstatistikleri
+            </DialogTitle>
+            <DialogDescription>
+              Yatırımlarınızın detaylı analizi ve grafikler
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            {/* Chart Type Selector */}
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1">
+                <Label>Grafik Türü</Label>
+                <Select value={selectedChartType} onValueChange={(value: 'pie' | 'profit') => setSelectedChartType(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pie">Pasta Grafiği - Portföy Dağılımı</SelectItem>
+                    <SelectItem value="profit">Kar/Zarar Grafiği</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {selectedChartType === 'profit' && (
+                <div className="flex-1">
+                  <Label>Döviz Seçimi</Label>
+                  <Select value={selectedCurrencyForChart} onValueChange={setSelectedCurrencyForChart}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tüm Yatırımlar</SelectItem>
+                      {Array.from(new Set(investments.map(inv => inv.currency))).map(currency => (
+                        <SelectItem key={currency} value={currency}>
+                          {currency}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {/* Charts */}
+            <div className="min-h-[400px] flex items-center justify-center border rounded-lg p-8">
+              {selectedChartType === 'pie' ? (
+                <PieChart investments={investments} />
+              ) : (
+                <ProfitChart 
+                  investments={investments} 
+                  selectedCurrency={selectedCurrencyForChart}
+                />
+              )}
+            </div>
+
+            {/* Summary Statistics */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-blue-600">
+                    ₺{formatPrice(investments.reduce((sum, inv) => sum + (inv.amount * inv.buyPrice), 0))}
+                  </div>
+                  <div className="text-sm text-muted-foreground">Toplam Yatırım</div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-green-600">
+                    ₺{formatPrice(investments.reduce((sum, inv) => sum + (inv.amount * inv.currentValue), 0))}
+                  </div>
+                  <div className="text-sm text-muted-foreground">Mevcut Değer</div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-4">
+                  <div className={`text-2xl font-bold ${
+                    investments.reduce((sum, inv) => sum + inv.profit, 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {investments.reduce((sum, inv) => sum + inv.profit, 0) >= 0 ? '+' : ''}₺{formatPrice(investments.reduce((sum, inv) => sum + inv.profit, 0))}
+                  </div>
+                  <div className="text-sm text-muted-foreground">Toplam Kar/Zarar</div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-4">
+                  <div className={`text-2xl font-bold ${
+                    investments.reduce((sum, inv) => sum + inv.profit, 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {investments.length > 0 ? (
+                      ((investments.reduce((sum, inv) => sum + inv.profit, 0) / investments.reduce((sum, inv) => sum + (inv.amount * inv.buyPrice), 0)) * 100).toFixed(2)
+                    ) : '0.00'}%
+                  </div>
+                  <div className="text-sm text-muted-foreground">Getiri Oranı</div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
