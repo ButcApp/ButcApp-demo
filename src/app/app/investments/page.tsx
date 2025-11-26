@@ -209,12 +209,41 @@ export default function InvestmentsPage() {
           const calculation = calculateInvestmentProfit(investment, currentPrice)
           console.log(`Calculation result for ${investment.currency}:`, calculation)
           
+          // Veri tutarsızlığı kontrolü - API'den gelen mevcut değer ile DB'deki alış fiyatı arasındaki mantıksızlığı
+          const priceDifference = Math.abs(currentPrice - investment.buy_price)
+          const priceDifferencePercent = investment.buy_price > 0 ? (priceDifference / investment.buy_price) * 100 : 0
+          
+          // Eğer fiyat farkı %20'den fazlaysa, potansiyel veri tutarsızlığı uyarısı
+          if (priceDifferencePercent > 20) {
+            console.warn(`⚠️ POTANSİYEL VERİ TUTARSIZLIĞI - ${investment.currency}:`, {
+              buyPrice: investment.buy_price,
+              currentPrice: currentPrice,
+              difference: priceDifference,
+              differencePercent: priceDifferencePercent
+            })
+          }
+          
+          // Eğer fiyat farkı %20'den fazlaysa, potansiyel veri tutarsızlığı uyarısı
+          if (priceDifferencePercent > 20) {
+            console.warn(`⚠️ VERİ TUTARSIZLIĞI UYARISI - ${investment.currency}:`, {
+              buyPrice: investment.buy_price,
+              currentPrice: currentPrice,
+              difference: priceDifference,
+              differencePercent: priceDifferencePercent,
+              message: `Bu yatırımın alış fiyatı ile mevcut fiyatı arasında %${priceDifferencePercent.toFixed(1)} fark var. Lütfen veri kaynağını kontrol edin.`
+            })
+          }
+          
           return {
             ...investment,
             current_value: calculation.currentValue,
             profit: calculation.totalProfit,
             profit_percent: calculation.profitPercentage,
-            status: calculation.status
+            status: calculation.status,
+            warning: priceDifferencePercent > 20 ? {
+              message: `Fiyat farkı %${priceDifferencePercent.toFixed(1)} - Veri doğrulanıyor mu?`,
+              level: 'warning'
+            } : undefined
           }
         })
         
