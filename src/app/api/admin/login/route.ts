@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     const validation = loginSchema.safeParse(body)
     if (!validation.success) {
       return NextResponse.json(
-        { error: 'Geçersiz giriş bilgileri', details: validation.error.errors },
+        { error: 'Geçersiz giriş bilgileri', details: validation.error.issues },
         { status: 400 }
       )
     }
