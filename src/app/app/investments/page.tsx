@@ -50,8 +50,11 @@ export default function InvestmentsPage() {
   const { t } = useLanguage()
   const [selectedTab, setSelectedTab] = useState('currency')
   const [currencyData, setCurrencyData] = useState<CurrencyItem[]>([])
+  const [displayedCurrencies, setDisplayedCurrencies] = useState<CurrencyItem[]>([])
   const [isLoadingCurrency, setIsLoadingCurrency] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [visibleCount, setVisibleCount] = useState(8)
+  const [hasMore, setHasMore] = useState(true)
 
   // TCMB'den döviz verilerini çek
   const fetchCurrencyData = async () => {
@@ -74,6 +77,8 @@ export default function InvestmentsPage() {
           icon: <DollarSign className="w-5 h-5" />
         }))
         setCurrencyData(data)
+        setDisplayedCurrencies(data.slice(0, visibleCount))
+        setHasMore(data.length > visibleCount)
         setLastUpdated(new Date())
       } else {
         // Fallback data
@@ -90,6 +95,8 @@ export default function InvestmentsPage() {
           icon: <DollarSign className="w-5 h-5" />
         }))
         setCurrencyData(fallbackData)
+        setDisplayedCurrencies(fallbackData.slice(0, visibleCount))
+        setHasMore(fallbackData.length > visibleCount)
         setLastUpdated(new Date())
       }
     } catch (error) {
@@ -97,6 +104,15 @@ export default function InvestmentsPage() {
     } finally {
       setIsLoadingCurrency(false)
     }
+  }
+
+  // Load more currencies
+  const loadMoreCurrencies = () => {
+    const newCount = visibleCount + 8
+    const newDisplayed = currencyData.slice(0, newCount)
+    setDisplayedCurrencies(newDisplayed)
+    setVisibleCount(newCount)
+    setHasMore(currencyData.length > newCount)
   }
 
   useEffect(() => {
@@ -107,6 +123,15 @@ export default function InvestmentsPage() {
     
     return () => clearInterval(interval)
   }, [])
+
+  // Update displayed currencies when visible count changes
+  useEffect(() => {
+    if (currencyData.length > 0) {
+      const newDisplayed = currencyData.slice(0, visibleCount)
+      setDisplayedCurrencies(newDisplayed)
+      setHasMore(currencyData.length > visibleCount)
+    }
+  }, [currencyData, visibleCount])
 
   const cryptoData: CryptoItem[] = [
     {
@@ -210,6 +235,9 @@ export default function InvestmentsPage() {
       <div className="flex justify-between items-center">
         <div>
           <h3 className="text-lg font-semibold">Döviz Kurları</h3>
+          <p className="text-sm text-muted-foreground">
+            {currencyData.length > 0 ? `Gösterilen: ${displayedCurrencies.length} / ${currencyData.length}` : 'Yükleniyor...'}
+          </p>
           {lastUpdated && (
             <p className="text-sm text-muted-foreground">
               Son güncelleme: {lastUpdated.toLocaleTimeString('tr-TR')}
@@ -235,41 +263,55 @@ export default function InvestmentsPage() {
             </div>
           </Card>
         ) : (
-          data.map((item) => (
-            <Card key={item.symbol} className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    {item.icon}
+          <>
+            {data.map((item) => (
+              <Card key={item.symbol} className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      {item.icon}
+                    </div>
+                    <div>
+                      <div className="font-semibold">{item.symbol}</div>
+                      <div className="text-sm text-muted-foreground">{item.name}</div>
+                      {item.forexBuying && item.forexSelling && (
+                        <div className="text-xs text-muted-foreground">
+                          Alış: ₺{formatPrice(item.forexBuying)} | Satış: ₺{formatPrice(item.forexSelling)}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <div className="font-semibold">{item.symbol}</div>
-                    <div className="text-sm text-muted-foreground">{item.name}</div>
-                    {item.forexBuying && item.forexSelling && (
-                      <div className="text-xs text-muted-foreground">
-                        Alış: ₺{formatPrice(item.forexBuying)} | Satış: ₺{formatPrice(item.forexSelling)}
-                      </div>
-                    )}
+                  <div className="text-right">
+                    <div className="font-semibold text-lg">₺{formatPrice(item.price)}</div>
+                    <div className={`flex items-center justify-end space-x-1 ${
+                      item.change >= 0 ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {item.change >= 0 ? (
+                        <ArrowUpRight className="w-4 h-4" />
+                      ) : (
+                        <ArrowDownRight className="w-4 h-4" />
+                      )}
+                      <span className="text-sm font-medium">
+                        {item.change >= 0 ? '+' : ''}{formatPrice(item.change)} ({item.changePercent >= 0 ? '+' : ''}{item.changePercent.toFixed(2)}%)
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="font-semibold text-lg">₺{formatPrice(item.price)}</div>
-                  <div className={`flex items-center justify-end space-x-1 ${
-                    item.change >= 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {item.change >= 0 ? (
-                      <ArrowUpRight className="w-4 h-4" />
-                    ) : (
-                      <ArrowDownRight className="w-4 h-4" />
-                    )}
-                    <span className="text-sm font-medium">
-                      {item.change >= 0 ? '+' : ''}{formatPrice(item.change)} ({item.changePercent >= 0 ? '+' : ''}{item.changePercent.toFixed(2)}%)
-                    </span>
-                  </div>
-                </div>
+              </Card>
+            ))}
+            {hasMore && (
+              <div className="flex justify-center py-4">
+                <Button 
+                  variant="outline" 
+                  onClick={loadMoreCurrencies}
+                  disabled={isLoadingCurrency}
+                  className="w-full max-w-md"
+                >
+                  Daha Fazla Döviz Göster
+                </Button>
               </div>
-            </Card>
-          ))
+            )}
+          </>
         )}
       </div>
     </div>
@@ -430,7 +472,7 @@ export default function InvestmentsPage() {
           </TabsList>
 
           <TabsContent value="currency" className="space-y-6">
-            {renderCurrencyTable(currencyData)}
+            {renderCurrencyTable(displayedCurrencies)}
           </TabsContent>
 
           <TabsContent value="crypto" className="space-y-6">
