@@ -701,6 +701,16 @@ export default function InvestmentsPage() {
                   ⚠️ Seçilen tarih resmi tatil günüdür. TCMB bu gün için veri yayınlamaz.
                 </p>
               )}
+              {isDateHoliday(investmentForm.date) && historicalPrice && (
+                <p className="text-sm text-blue-600 mt-1">
+                  ℹ️ {investmentForm.date} tarihinde veri bulunamadı. Önceki çalışma günü ({new Date(historicalPrice.timestamp).toLocaleDateString('tr-TR')}) verileri kullanılıyor.
+                </p>
+              )}
+              {!isDateHoliday(investmentForm.date) && !historicalPrice && (
+                <p className="text-sm text-orange-600 mt-1">
+                  ⚠️ {investmentForm.date} tarihi için veri bulunamadı.
+                </p>
+              )}
             </div>
 
             <div>
