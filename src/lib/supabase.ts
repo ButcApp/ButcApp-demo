@@ -25,9 +25,12 @@ export type Database = {
           amount: number
           buy_price: number
           buy_date: string
+          sell_price?: number
+          sell_date?: string
           current_value: number
           profit: number
           profit_percent: number
+          status: 'active' | 'sold'
           created_at: string
           updated_at: string
         }
@@ -39,9 +42,12 @@ export type Database = {
           amount: number
           buy_price: number
           buy_date: string
+          sell_price?: number
+          sell_date?: string
           current_value?: number
           profit?: number
           profit_percent?: number
+          status?: 'active' | 'sold'
           created_at?: string
           updated_at?: string
         }
@@ -53,9 +59,12 @@ export type Database = {
           amount?: number
           buy_price?: number
           buy_date?: string
+          sell_price?: number
+          sell_date?: string
           current_value?: number
           profit?: number
           profit_percent?: number
+          status?: 'active' | 'sold'
           updated_at?: string
         }
       }

@@ -131,8 +131,23 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
     )
   }
 
+  // Extract data from chartData for easier access
+  const { investments: investmentData, totalInvestment, currentValue, totalProfit, profitPercentage } = chartData
+
   const chartHeight = 300
   const chartWidth = 600
+  
+  // Calculate maximum value for scaling
+  const maxValue = Math.max(
+    ...investmentData.map(inv => {
+      const buyValue = (Number(inv.buy_price) || 0) * (Number(inv.amount) || 0)
+      const currentValue = (Number(inv.current_value) || 0) * (Number(inv.amount) || 0)
+      const maxValue = Math.max(buyValue, currentValue)
+      return !isNaN(maxValue) && maxValue > 0 ? maxValue : 1
+    }),
+    1 // Minimum fallback value
+  )
+  
   const scale = maxValue > 0 ? (chartHeight - 60) / maxValue : 0
 
   return (
@@ -157,7 +172,7 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
         
         <div className="text-center p-4 border rounded-lg">
           <div className={`text-2xl font-bold ${totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {totalProfit >= 0 ? '+' : ''}₺{totalProfit.toLocaleString('tr-RT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {totalProfit >= 0 ? '+' : ''}₺{totalProfit.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-sm text-muted-foreground">
             Kar/Zarar ({profitPercentage >= 0 ? '+' : ''}{profitPercentage.toFixed(2)}%)
@@ -197,11 +212,20 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
           })}
           
           {/* Bars */}
-          {chartData.investments.map((investment, index) => {
+          {investmentData.map((investment, index) => {
             const buyValue = (Number(investment.buy_price) || 0) * (Number(investment.amount) || 0)
             const currentValue = (Number(investment.current_value) || 0) * (Number(investment.amount) || 0)
             const profit = currentValue - buyValue
             const profitHeight = Math.abs(profit) * scale
+            
+            console.log('Investment:', {
+              id: investment.id,
+              buyValue,
+              currentValue,
+              profit,
+              scale,
+              profitHeight
+            })
             
             const x = 60 + index * 70
             const buyHeight = buyValue * scale
@@ -212,9 +236,9 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
                 {/* Buy value bar */}
                 <rect
                   x={x}
-                  y={chartHeight - 30 - buyHeight}
+                  y={chartHeight - 30 - (typeof buyHeight === 'number' && !isNaN(buyHeight) && buyHeight > 0 ? buyHeight : 0)}
                   width={50}
-                  height={buyHeight}
+                  height={typeof buyHeight === 'number' && !isNaN(buyHeight) && buyHeight > 0 ? buyHeight : 0}
                   fill="#3b82f6"
                   opacity={0.7}
                 />
@@ -222,15 +246,15 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
                 {/* Current value bar */}
                 <rect
                   x={x + 20}
-                  y={chartHeight - 30 - currentHeight}
+                  y={chartHeight - 30 - (typeof currentHeight === 'number' && !isNaN(currentHeight) && currentHeight > 0 ? currentHeight : 0)}
                   width={50}
-                  height={currentHeight}
+                  height={typeof currentHeight === 'number' && !isNaN(currentHeight) && currentHeight > 0 ? currentHeight : 0}
                   fill={profit >= 0 ? '#10b981' : '#ef4444'}
                   opacity={0.8}
                 />
                 
                 {/* Profit/Loss indicator */}
-                {profit !== 0 && (
+                {profit !== 0 && typeof profitHeight === 'number' && !isNaN(profitHeight) && profitHeight > 0 && (
                   <rect
                     x={x + 35}
                     y={chartHeight - 30 - profitHeight - 5}

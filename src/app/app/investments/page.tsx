@@ -9,14 +9,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { TrendingUp, TrendingDown, DollarSign, Bitcoin, Gem, ArrowUpRight, ArrowDownRight, Activity, BarChart3, RefreshCw, Clock, Star, AlertCircle, Plus, Calendar, Zap, Target, Wallet, PieChart as PieChartIcon, TrendingUp as TrendingUpIcon } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Bitcoin, Gem, ArrowUpRight, ArrowDownRight, Activity, BarChart3, RefreshCw, Clock, Star, AlertCircle, Plus, Calendar, Zap, Target, Wallet, PieChart as PieChartIcon, TrendingUp as TrendingUpIcon, Trash2 } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { LanguageToggle } from '@/components/language-toggle'
 import { UserAuthButton } from '@/components/auth/UserAuthButton'
 import { PieChart } from '@/components/charts/PieChart'
 import { ProfitChart } from '@/components/charts/ProfitChart'
+import { SummaryStatistics } from '@/components/SummaryStatistics'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { supabase } from '@/lib/supabase'
+import { calculateInvestmentProfit, calculateTotalProfit, formatProfitDetails } from '@/lib/investment-calculator'
 import Link from 'next/link'
 
 interface CurrencyItem {
@@ -108,6 +110,11 @@ export default function InvestmentsPage() {
   const [showStatisticsDialog, setShowStatisticsDialog] = useState(false)
   const [selectedChartType, setSelectedChartType] = useState<'pie' | 'profit'>('pie')
   const [selectedCurrencyForChart, setSelectedCurrencyForChart] = useState<string>('all')
+  
+  // Delete states
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [investmentToDelete, setInvestmentToDelete] = useState<string | null>(null)
 
   // Check user authentication
   useEffect(() => {
@@ -156,21 +163,124 @@ export default function InvestmentsPage() {
     setIsLoadingInvestments(true)
     try {
       console.log('Fetching investments for userId:', userId)
-      const response = await fetch(`/api/investments?userId=${userId}`)
-      const result = await response.json()
       
-      console.log('Investments API response:', result)
+      // Fetch both investments and current currency rates
+      const [investmentsResponse, currencyResponse] = await Promise.all([
+        fetch(`/api/investments?userId=${userId}`),
+        fetch('/api/currency')
+      ])
       
-      if (result.success) {
-        console.log('Investments data received:', result.data)
-        setInvestments(result.data || [])
+      const investmentsResult = await investmentsResponse.json()
+      const currencyResult = await currencyResponse.json()
+      
+      console.log('Investments API response:', investmentsResult)
+      console.log('Currency API response:', currencyResult)
+      
+      if (investmentsResult.success) {
+        let investmentsData = investmentsResult.data || []
+        
+        // Create current prices map
+        const currentPrices: Record<string, number> = {}
+        if (currencyResult.success && currencyResult.data) {
+          currencyResult.data.forEach((item: any) => {
+            // Extract currency code from symbol (USD from USD/TRY, EUR from EUR/TRY, etc.)
+            const currencyCode = item.symbol.split('/')[0]
+            if (currencyCode) {
+              currentPrices[item.symbol] = item.price // Use full symbol as key
+              console.log(`Mapped ${item.symbol}: ${item.price}`)
+            }
+          })
+        }
+        
+        console.log('Current prices map:', currentPrices)
+        console.log('Investments before update:', investmentsData)
+        
+        // Update investments with current values and profit calculations
+        investmentsData = investmentsData.map((investment: any) => {
+          const currentPrice = currentPrices[investment.currency] || investment.buy_price
+          console.log(`Processing investment ${investment.currency}:`, {
+            currentPrice,
+            investmentCurrency: investment.currency,
+            buyPrice: investment.buy_price,
+            amount: investment.amount,
+            hasCurrentPrice: !!currentPrices[investment.currency]
+          })
+          
+          const calculation = calculateInvestmentProfit(investment, currentPrice)
+          console.log(`Calculation result for ${investment.currency}:`, calculation)
+          
+          return {
+            ...investment,
+            current_value: calculation.currentValue,
+            profit: calculation.totalProfit,
+            profit_percent: calculation.profitPercentage,
+            status: calculation.status
+          }
+        })
+        
+        console.log('Updated investments with profit calculations:', investmentsData)
+        setInvestments(investmentsData)
       } else {
-        console.error('Failed to fetch investments:', result.error)
+        console.error('Failed to fetch investments:', investmentsResult.error)
       }
     } catch (error) {
       console.error('Investments fetch error:', error)
     } finally {
       setIsLoadingInvestments(false)
+    }
+  }
+
+  // Delete investment function
+  const deleteInvestment = async (id: string) => {
+    setIsDeleting(true)
+    try {
+      console.log('Starting delete for investment:', id)
+      
+      // Get current session token
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+
+      console.log('Session data:', { 
+        hasSession: !!session, 
+        hasToken: !!token,
+        userId: user?.id 
+      })
+
+      if (!token) {
+        console.error('No auth token available')
+        // Try to get user session directly
+        const { data: { user: currentUser } } = await supabase.auth.getUser()
+        console.log('Direct user check:', currentUser)
+        return
+      }
+
+      const response = await fetch(`/api/investments/delete?id=${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      const result = await response.json()
+      console.log('Delete API response:', { status: response.status, result })
+      
+      if (result.success) {
+        console.log('Investment deleted successfully:', result)
+        // Refresh investments list
+        if (user) {
+          await fetchInvestments(user.id)
+        }
+        // Close delete confirmation dialog
+        setDeleteConfirmOpen(false)
+        setInvestmentToDelete(null)
+      } else {
+        console.error('Failed to delete investment:', result.error)
+      }
+    } catch (error) {
+      console.error('Delete investment error:', error)
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -259,22 +369,38 @@ export default function InvestmentsPage() {
     try {
       const buyPrice = historicalPrice || selectedCurrency.price
       
+      const requestData = {
+        userId: user.id,
+        currency: selectedCurrency.symbol,
+        currencyName: selectedCurrency.name,
+        amount: investmentForm.amount,
+        buyPrice: buyPrice,
+        buyDate: investmentForm.date
+      }
+
+      console.log('Creating investment with data:', {
+        user: { id: user.id, email: user.email },
+        selectedCurrency: selectedCurrency,
+        investmentForm,
+        buyPrice,
+        requestData
+      })
+      
       const response = await fetch('/api/investments', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          userId: user.id,
-          currency: selectedCurrency.symbol,
-          currencyName: selectedCurrency.name,
-          amount: investmentForm.amount,
-          buyPrice: buyPrice,
-          buyDate: investmentForm.date
-        })
+        body: JSON.stringify(requestData)
       })
       
       const result = await response.json()
+      
+      console.log('Investment creation response:', {
+        status: response.status,
+        ok: response.ok,
+        result
+      })
       
       if (result.success) {
         // Refresh investments list
@@ -297,10 +423,12 @@ export default function InvestmentsPage() {
         console.error('Error details:', result.details)
         
         // Show user-friendly error message
-        if (result.details?.includes('table')) {
-          alert('Veritabanı tablosu bulunamadı. Lütfen Supabase ayarlarınızı kontrol edin.')
+        if (result.details?.includes('table') || result.details?.includes('relation')) {
+          alert('Veritabanı tablosu bulunamadı. Lütfen Supabase investments tablosunu oluşturun.')
+        } else if (result.details?.includes('column')) {
+          alert('Veritabanı sütunu eksik. Lütfen Supabase migration script\'ini çalıştırın.')
         } else {
-          alert(`Yatırım oluşturulamadı: ${result.error}`)
+          alert(`Yatırım oluşturulamadı: ${result.error}${result.details ? ` - ${result.details}` : ''}`)
         }
       }
     } catch (error) {
@@ -341,7 +469,7 @@ export default function InvestmentsPage() {
       '2025-07-15', // Demokrasi ve Milli Birlik Günü
       '2025-08-30', // Zafer Bayramı
       '2025-10-29', // Cumhuriyet Bayramı
-      '2025-11-10' // Atatürk'ü Anma Günü
+      '2025-11-10' // Ataturk Anma Gunu
     ]
     return holidays.includes(date)
   }
@@ -943,29 +1071,69 @@ export default function InvestmentsPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4 max-h-96 overflow-y-auto">
-                {investments.map((investment) => (
-                  <div key={investment.id} className="p-4 border rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-semibold">{investment.currency}</div>
-                        <div className="text-sm text-muted-foreground">{investment.currency_name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          Alış: {new Date(investment.buy_date).toLocaleDateString('tr-TR')}
+                {investments.map((investment) => {
+                  const profitDetails = formatProfitDetails(
+                    calculateInvestmentProfit(investment, investment.current_value / investment.amount)
+                  )
+                  
+                  return (
+                    <div key={investment.id} className="p-4 border rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <div className="font-semibold">{investment.currency}</div>
+                            <Badge variant={investment.status === 'sold' ? 'secondary' : 'default'}>
+                              {investment.status === 'sold' ? 'Satıldı' : 'Aktif'}
+                            </Badge>
+                          </div>
+                          <div className="text-sm text-muted-foreground">{investment.currency_name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Alış: {new Date(investment.buy_date).toLocaleDateString('tr-TR')} - ₺{investment.buy_price.toFixed(2)}
+                          </div>
+                          {investment.sell_date && (
+                            <div className="text-xs text-muted-foreground">
+                              Satış: {new Date(investment.sell_date).toLocaleDateString('tr-TR')} - ₺{investment.sell_price?.toFixed(2)}
+                            </div>
+                          )}
+                          <div className="text-xs text-muted-foreground">
+                            Miktar: {investment.amount} {investment.currency}
+                          </div>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold">
-                          ₺{formatPrice(investment.amount * investment.current_value)}
-                        </div>
-                        <div className={`text-sm ${
-                          investment.profit >= 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {investment.profit >= 0 ? '+' : ''}₺{formatPrice(investment.profit)} ({investment.profit_percent >= 0 ? '+' : ''}{investment.profit_percent.toFixed(2)}%)
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <div className="font-semibold">
+                              ₺{formatPrice(investment.current_value)}
+                            </div>
+                            <div className={`text-sm font-medium ${
+                              investment.profit >= 0 ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              {investment.profit >= 0 ? '+' : ''}₺{formatPrice(investment.profit)}
+                            </div>
+                            <div className={`text-xs ${
+                              investment.profit_percent >= 0 ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              ({investment.profit_percent >= 0 ? '+' : ''}{investment.profit_percent.toFixed(2)}%)
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {profitDetails.status}
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setInvestmentToDelete(investment.id)
+                              setDeleteConfirmOpen(true)
+                            }}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </CardContent>
           </Card>
@@ -1034,49 +1202,7 @@ export default function InvestmentsPage() {
             </div>
 
             {/* Summary Statistics */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Card>
-                <CardContent className="p-4">
-                  <div className="text-2xl font-bold text-blue-600">
-                    ₺{formatPrice(investments.reduce((sum, inv) => sum + (inv.amount * inv.buy_price), 0))}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Toplam Yatırım</div>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardContent className="p-4">
-                  <div className="text-2xl font-bold text-green-600">
-                    ₺{formatPrice(investments.reduce((sum, inv) => sum + (inv.amount * inv.current_value), 0))}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Mevcut Değer</div>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardContent className="p-4">
-                  <div className={`text-2xl font-bold ${
-                    investments.reduce((sum, inv) => sum + inv.profit, 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {investments.reduce((sum, inv) => sum + inv.profit, 0) >= 0 ? '+' : ''}₺{formatPrice(investments.reduce((sum, inv) => sum + inv.profit, 0))}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Toplam Kar/Zarar</div>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardContent className="p-4">
-                  <div className={`text-2xl font-bold ${
-                    investments.reduce((sum, inv) => sum + inv.profit, 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {investments.length > 0 ? (
-                      ((investments.reduce((sum, inv) => sum + inv.profit, 0) / investments.reduce((sum, inv) => sum + (inv.amount * inv.buy_price), 0)) * 100).toFixed(2)
-                    ) : '0.00'}%
-                  </div>
-                  <div className="text-sm text-muted-foreground">Getiri Oranı</div>
-                </CardContent>
-              </Card>
-            </div>
+            <SummaryStatistics investments={investments} />
           </div>
         </DialogContent>
       </Dialog>
@@ -1109,6 +1235,37 @@ export default function InvestmentsPage() {
           </Card>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Yatırımı Sil</DialogTitle>
+            <DialogDescription>
+              Bu yatırımı silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteConfirmOpen(false)
+                setInvestmentToDelete(null)
+              }}
+              disabled={isDeleting}
+            >
+              İptal
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => investmentToDelete && deleteInvestment(investmentToDelete)}
+              disabled={isDeleting || !investmentToDelete}
+            >
+              {isDeleting ? 'Siliniyor...' : 'Sil'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

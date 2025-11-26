@@ -48,46 +48,81 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { userId, currency, currencyName, amount, buyPrice, buyDate } = body
+    const { userId, currency, currencyName, amount, buyPrice, buyDate, sellPrice, sellDate, status } = body
+
+    console.log('POST /api/investments - Request body:', {
+      userId,
+      currency,
+      currencyName,
+      amount,
+      buyPrice,
+      buyDate,
+      sellPrice,
+      sellDate,
+      status
+    })
 
     if (!userId || !currency || !currencyName || !amount || !buyPrice || !buyDate) {
+      console.error('Missing required fields:', {
+        hasUserId: !!userId,
+        hasCurrency: !!currency,
+        hasCurrencyName: !!currencyName,
+        hasAmount: !!amount,
+        hasBuyPrice: !!buyPrice,
+        hasBuyDate: !!buyDate
+      })
       return NextResponse.json({
         success: false,
         error: 'Missing required fields: userId, currency, currencyName, amount, buyPrice, buyDate'
       }, { status: 400 })
     }
 
-    // Calculate current value and profit (initially same as buy price)
-    const currentValue = buyPrice
+    // Calculate initial values
+    const currentValue = parseFloat(buyPrice)
     const profit = 0
     const profitPercent = 0
 
+    const insertData = {
+      user_id: userId,
+      currency,
+      currency_name: currencyName,
+      amount: parseFloat(amount),
+      buy_price: parseFloat(buyPrice),
+      buy_date: buyDate,
+      sell_price: sellPrice ? parseFloat(sellPrice) : null,
+      sell_date: sellDate || null,
+      current_value: currentValue,
+      profit,
+      profit_percent: profitPercent,
+      status: status || 'active',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }
+
+    console.log('Insert data prepared:', insertData)
+
     const { data, error } = await supabaseAdmin
       .from('investments')
-      .insert({
-        user_id: userId,
-        currency,
-        currency_name: currencyName,
-        amount: parseFloat(amount),
-        buy_price: parseFloat(buyPrice),
-        buy_date: buyDate,
-        current_value: currentValue,
-        profit,
-        profit_percent: profitPercent,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
+      .insert(insertData)
       .select()
       .single()
 
     if (error) {
-      console.error('Supabase error:', error)
+      console.error('Supabase insert error:', {
+        error,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      })
       return NextResponse.json({
         success: false,
         error: 'Failed to create investment',
         details: error.message
       }, { status: 500 })
     }
+
+    console.log('Investment created successfully:', data)
 
     return NextResponse.json({
       success: true,
@@ -101,6 +136,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: false,
       error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
       timestamp: new Date().toISOString()
     }, { status: 500 })
   }
