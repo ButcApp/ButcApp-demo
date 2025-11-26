@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { ArrowRight, TrendingUp, PiggyBank, Users, CheckCircle, BarChart3, Lock, Zap, Github, HelpCircle, X, Mail, Send, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { ArrowRight, TrendingUp, PiggyBank, Users, CheckCircle, BarChart3, Lock, Zap, HelpCircle, X, Mail, Send, AlertCircle, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { LanguageToggle } from '@/components/language-toggle'
@@ -161,21 +161,6 @@ export default function HomePage() {
                 {t('home.start')}
                 <ArrowRight className="ml-2 w-5 h-5" />
               </Button>
-              
-              <a 
-                href="https://github.com/ahwetekm/CepFinans" 
-                target="_blank" 
-                rel="noopener noreferrer"
-              >
-                <Button 
-                  size="lg" 
-                  variant="outline" 
-                  className="border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 px-8 py-4 text-xl font-medium transition-all duration-300 hover:scale-105"
-                >
-                  <Github className="mr-2 w-5 h-5" />
-                  {t('home.sourceCode')}
-                </Button>
-              </a>
             </div>
 
             {/* Nasıl Kullanılır Butonu */}
