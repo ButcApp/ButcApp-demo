@@ -3,6 +3,14 @@
 import { useMemo } from 'react'
 import { Investment } from '@/app/app/investments/page'
 
+// Format price function
+const formatPrice = (price: number) => {
+  return new Intl.NumberFormat('tr-TR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(price)
+}
+
 interface ProfitChartProps {
   investments: Investment[]
   selectedCurrency: string
@@ -158,21 +166,21 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="text-center p-4 border rounded-lg">
           <div className="text-2xl font-bold text-blue-600">
-            ₺{totalInvestment.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₺{formatPrice(totalInvestment)}
           </div>
           <div className="text-sm text-muted-foreground">Toplam Yatırım</div>
         </div>
         
         <div className="text-center p-4 border rounded-lg">
           <div className="text-2xl font-bold text-green-600">
-            ₺{currentValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₺{formatPrice(currentValue)}
           </div>
           <div className="text-sm text-muted-foreground">Mevcut Değer</div>
         </div>
         
         <div className="text-center p-4 border rounded-lg">
           <div className={`text-2xl font-bold ${totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {totalProfit >= 0 ? '+' : ''}₺{totalProfit.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {totalProfit >= 0 ? '+' : ''}₺{formatPrice(totalProfit)}
           </div>
           <div className="text-sm text-muted-foreground">
             Kar/Zarar ({profitPercentage >= 0 ? '+' : ''}{profitPercentage.toFixed(2)}%)
@@ -284,7 +292,7 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
                   fontWeight="bold"
                   fill={profit >= 0 ? '#10b981' : '#ef4444'}
                 >
-                  {profit >= 0 ? '+' : ''}₺{profit.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {profit >= 0 ? '+' : ''}₺{formatPrice(profit)}
                 </text>
               </g>
             )
@@ -313,18 +321,18 @@ export function ProfitChart({ investments, selectedCurrency }: ProfitChartProps)
               <div className="flex items-center gap-6 text-right">
                 <div>
                   <div className="text-sm text-muted-foreground">Alış</div>
-                  <div className="font-medium">₺{buyValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  <div className="font-medium">₺{formatPrice(buyValue)}</div>
                 </div>
                 
                 <div>
                   <div className="text-sm text-muted-foreground">Mevcut</div>
-                  <div className="font-medium">₺{currentValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  <div className="font-medium">₺{formatPrice(currentValue)}</div>
                 </div>
                 
                 <div>
                   <div className="text-sm text-muted-foreground">Kar/Zarar</div>
                   <div className={`font-medium ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {profit >= 0 ? '+' : ''}₺{profit.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {profit >= 0 ? '+' : ''}₺{formatPrice(profit)}
                     <div className="text-xs">
                       ({profitPercentage >= 0 ? '+' : ''}{profitPercentage.toFixed(2)}%)
                     </div>

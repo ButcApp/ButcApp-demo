@@ -104,6 +104,18 @@ export const SummaryStatistics: React.FC<SummaryStatisticsProps> = ({ investment
     investmentsCount
   }
 
+  // Return early if no investments
+  if (investments.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center text-center p-8">
+        <div className="text-center">
+          <h3 className="text-lg font-semibold mb-2">İstatistik Verisi Bulunamadı</h3>
+          <p className="text-muted-foreground">Henüz yatırım verisi bulunmuyor</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Currency-wise Statistics */}

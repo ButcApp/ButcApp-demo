@@ -3,57 +3,22 @@
 import { useMemo } from 'react'
 import { Investment } from '@/app/app/investments/page'
 
+// Format price function
+const formatPrice = (price: number) => {
+  return new Intl.NumberFormat('tr-TR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(price)
+}
+
 interface PieChartProps {
   investments: Investment[]
 }
 
 export function PieChart({ investments }: PieChartProps) {
-  const chartData = useMemo(() => {
-    if (investments.length === 0) return []
-    
-    // Group investments by currency and calculate total value
-    const currencyGroups = investments.reduce((acc, investment) => {
-      // Extract currency code from symbol (USD from USD/TRY, EUR from EUR/TRY, etc.)
-      const currencyCode = investment.currency.split('/')[0]
-      const currency = currencyCode || investment.currency
-      
-      const totalValue = investment.amount * investment.current_value
-      
-      if (!acc[currency]) {
-        acc[currency] = {
-          currency,
-          name: investment.currency_name,
-          value: 0,
-          count: 0
-        }
-      }
-      
-      acc[currency].value += totalValue
-      acc[currency].count += 1
-      
-      return acc
-    }, {} as Record<string, { currency: string; name: string; value: number; count: number }>)
-    
-    const totalValue = Object.values(currencyGroups).reduce((sum, group) => sum + group.value, 0)
-    
-    return Object.values(currencyGroups).map(group => ({
-      ...group,
-      percentage: totalValue > 0 ? (group.value / totalValue) * 100 : 0,
-      color: getCurrencyColor(group.currency)
-    })).sort((a, b) => b.value - a.value)
-  }, [investments])
+  // Calculate pie chart paths
+  const radius = 120
   
-  if (investments.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center text-center">
-        <div className="w-32 h-32 border-4 border-dashed border-gray-300 rounded-full flex items-center justify-center mb-4">
-          <span className="text-gray-500 text-sm">Veri Yok</span>
-        </div>
-        <p className="text-muted-foreground">Henüz yatırım verisi bulunmuyor</p>
-      </div>
-    )
-  }
-
   function getCurrencyColor(currency: string): string {
     // Extract currency code from symbol (USD from USD/TRY, EUR from EUR/TRY, etc.)
     const currencyCode = currency.split('/')[0]
@@ -82,6 +47,89 @@ export function PieChart({ investments }: PieChartProps) {
     }
     
     return colors[currencyCode] || '#94a3b8' // default gray
+  }
+  
+  const chartData = useMemo(() => {
+    if (investments.length === 0) return []
+    
+    // Group investments by currency and calculate total value
+    const currencyGroups = investments.reduce((acc, investment) => {
+      // Extract currency code from symbol (USD from USD/TRY, EUR from EUR/TRY, etc.)
+      const currencyCode = investment.currency.split('/')[0]
+      const currency = currencyCode || investment.currency
+      
+      // Use current_value directly as it's already calculated per investment
+      const totalValue = investment.current_value
+      
+      if (!acc[currency]) {
+        acc[currency] = {
+          currency,
+          name: investment.currency_name,
+          value: 0,
+          count: 0
+        }
+      }
+      
+      acc[currency].value += totalValue
+      acc[currency].count += 1
+      
+      return acc
+    }, {} as Record<string, { currency: string; name: string; value: number; count: number }>)
+    
+    const totalValue = Object.values(currencyGroups).reduce((sum, group) => sum + group.value, 0)
+    
+    return Object.values(currencyGroups).map(group => ({
+      ...group,
+      percentage: totalValue > 0 ? (group.value / totalValue) * 100 : 0,
+      color: getCurrencyColor(group.currency)
+    })).sort((a, b) => b.value - a.value)
+  }, [investments])
+
+  const paths = useMemo(() => {
+    if (chartData.length === 0) return []
+    
+    let currentAngle = -90 // Start from top
+    
+    return chartData.map((segment) => {
+      const angle = (segment.percentage / 100) * 360
+      const startAngle = currentAngle
+      const endAngle = currentAngle + angle
+      
+      const startAngleRad = (startAngle * Math.PI) / 180
+      const endAngleRad = (endAngle * Math.PI) / 180
+      
+      const x1 = radius + radius * Math.cos(startAngleRad)
+      const y1 = radius + radius * Math.sin(startAngleRad)
+      const x2 = radius + radius * Math.cos(endAngleRad)
+      const y2 = radius + radius * Math.sin(endAngleRad)
+      
+      const largeArcFlag = angle > 180 ? 1 : 0
+      
+      const path = [
+        `M ${radius} ${radius}`,
+        `L ${x1} ${y1}`,
+        `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`,
+        'Z'
+      ].join(' ')
+      
+      currentAngle = endAngle
+      
+      return {
+        ...segment,
+        path
+      }
+    })
+  }, [chartData])
+  
+  if (investments.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center text-center">
+        <div className="w-32 h-32 border-4 border-dashed border-gray-300 rounded-full flex items-center justify-center mb-4">
+          <span className="text-gray-500 text-sm">Veri Yok</span>
+        </div>
+        <p className="text-muted-foreground">Henüz yatırım verisi bulunmuyor</p>
+      </div>
+    )
   }
 
   return (
@@ -119,7 +167,7 @@ export function PieChart({ investments }: PieChartProps) {
               </div>
             </div>
             <div className="text-right">
-              <div className="font-medium">₺{segment.value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="font-medium">₺{formatPrice(segment.value)}</div>
               <div className="text-sm text-muted-foreground">{segment.percentage.toFixed(1)}%</div>
             </div>
           </div>
@@ -130,7 +178,7 @@ export function PieChart({ investments }: PieChartProps) {
           <div className="flex justify-between items-center">
             <span className="font-semibold">Toplam Değer</span>
             <span className="font-bold text-lg">
-              ₺{chartData.reduce((sum, segment) => sum + segment.value, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₺{formatPrice(chartData.reduce((sum, segment) => sum + segment.value, 0))}
             </span>
           </div>
         </div>
