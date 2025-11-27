@@ -439,20 +439,44 @@ export default function InvestmentsPage() {
   }
 
   // Load historical price for investment
-  const fetchHistoricalPrice = async (date: string, currencyCode: string) => {
+  const fetchHistoricalPrice = async (date: string, currencyCode: string, type: 'currency' | 'crypto') => {
     setIsLoadingHistorical(true)
     try {
-      const response = await fetch(`/api/currency-historical?date=${date}`)
+      let response
+      
+      if (type === 'crypto') {
+        // Use unified historical API for crypto
+        response = await fetch(`/api/historical?date=${date}&cryptoId=${currencyCode.toLowerCase()}&type=crypto`)
+      } else {
+        // Use unified historical API for currency
+        response = await fetch(`/api/historical?date=${date}&type=currency`)
+      }
+      
       const result = await response.json()
       
-      if (result.success) {
-        const currency = result.data.find((c: any) => c.symbol === currencyCode)
-        if (currency) {
-          setHistoricalPrice(currency.price)
+      if (result.success && result.data && result.data.length > 0) {
+        // Find the specific item in the data
+        let historicalItem
+        if (type === 'crypto') {
+          historicalItem = result.data.find((c: any) => c.symbol.toLowerCase() === currencyCode.toLowerCase())
+        } else {
+          historicalItem = result.data.find((c: any) => c.symbol === currencyCode)
         }
+        
+        if (historicalItem) {
+          setHistoricalPrice(historicalItem.price)
+          console.log(`Historical price found for ${currencyCode}: $${historicalItem.price}`)
+        } else {
+          console.warn(`No historical price found for ${currencyCode}`)
+          setHistoricalPrice(null)
+        }
+      } else {
+        console.warn(`No historical data available for ${date}`)
+        setHistoricalPrice(null)
       }
     } catch (error) {
-      console.error('Historical price fetch error:', error)
+      console.error('❌ Historical price fetch error:', error)
+      setHistoricalPrice(null)
     } finally {
       setIsLoadingHistorical(false)
     }
@@ -555,7 +579,8 @@ export default function InvestmentsPage() {
     
     // Fetch historical price for the selected date
     if (investmentForm.date !== new Date().toISOString().split('T')[0]) {
-      fetchHistoricalPrice(investmentForm.date, currency.symbol)
+      const currencyType = getInvestmentCategory(currency.symbol)
+      fetchHistoricalPrice(investmentForm.date, currency.symbol, currencyType)
     } else {
       setHistoricalPrice(null)
     }
