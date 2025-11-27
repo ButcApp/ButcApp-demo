@@ -1,15 +1,8 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
-import { useRouter } from 'next/navigation'
-
-interface User {
-  id: string
-  email: string
-  name?: string
-  avatar_url?: string
-  full_name?: string
-}
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createClient } from '@/lib/supabase-client'
+import { User } from '@supabase/supabase-js'
 
 interface AuthContextType {
   user: User | null
@@ -30,45 +23,61 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const router = useRouter()
+  const supabase = createClient()
 
   useEffect(() => {
-    // Local storage'dan user'ı kontrol et
-    const savedUser = localStorage.getItem('user')
-    if (savedUser) {
+    // Get initial session
+    const getInitialSession = async () => {
       try {
-        setUser(JSON.parse(savedUser))
+        const { data: { session }, error } = await supabase.auth.getSession()
+        if (error) {
+          console.error('Error getting initial session:', error)
+        } else {
+          setUser(session?.user || null)
+        }
       } catch (error) {
-        console.error('Error parsing saved user:', error)
-        localStorage.removeItem('user')
+        console.error('Error in getInitialSession:', error)
+      } finally {
+        setLoading(false)
       }
     }
-    setLoading(false)
+
+    getInitialSession()
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log('Auth state changed:', { event: _event, session: session?.user?.id })
+      setUser(session?.user || null)
+      setLoading(false)
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   const signUp = async (email: string, password: string, fullName?: string) => {
     try {
       console.log('Attempting to sign up with email:', email)
       
-      // Mock signup - her zaman başarılı
-      const newUser: User = {
-        id: `user_${Date.now()}`,
+      const { data, error } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
-        full_name: fullName || null,
-        name: fullName || email.split('@')[0]
+        password,
+        options: {
+          data: {
+            full_name: fullName || null,
+          }
+        }
+      })
+
+      if (error) {
+        console.error('Signup error:', error)
+        return { error }
       }
 
-      // Local storage'a kaydet
-      localStorage.setItem('user', JSON.stringify(newUser))
-      setUser(newUser)
-
-      // App sayfasına yönlendir
-      router.push('/app')
-      
+      console.log('Signup successful:', data)
       return { error: null }
     } catch (error) {
       console.error('Signup error:', error)
-      return { error: error as any }
+      return { error }
     }
   }
 
@@ -76,44 +85,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       console.log('Attempting to sign in with email:', email)
       
-      // Mock authentication
-      if (email === 'admin@butcapp.com' && password === 'admin123') {
-        const adminUser: User = {
-          id: 'admin123',
-          email: 'admin@butcapp.com',
-          name: 'Admin',
-          full_name: 'ButcApp Admin'
-        }
-
-        localStorage.setItem('user', JSON.stringify(adminUser))
-        setUser(adminUser)
-        router.push('/app')
-        return { error: null }
-      }
-
-      // Regular user login
-      const regularUser: User = {
-        id: `user_${Date.now()}`,
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
-        name: email.split('@')[0]
+        password
+      })
+
+      if (error) {
+        console.error('Signin error:', error)
+        return { error }
       }
 
-      localStorage.setItem('user', JSON.stringify(regularUser))
-      setUser(regularUser)
-      router.push('/app')
-      
+      console.log('Signin successful:', data)
       return { error: null }
     } catch (error) {
       console.error('Signin error:', error)
-      return { error: error as any }
+      return { error }
     }
   }
 
   const signOut = async () => {
     try {
-      localStorage.removeItem('user')
+      await supabase.auth.signOut()
       setUser(null)
-      router.push('/')
     } catch (error) {
       console.error('Error signing out:', error)
     }
@@ -122,21 +115,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const resetPassword = async (email: string) => {
     try {
       console.log('Password reset requested for email:', email)
-      // Mock password reset - her zaman başarılı
-      return { error: null }
+      const { error } = await supabase.auth.resetPasswordForEmail(email)
+      return { error }
     } catch (error) {
       console.error('Password reset error:', error)
-      return { error: error as any }
+      return { error }
     }
   }
 
   const updateUser = async () => {
     try {
-      const savedUser = localStorage.getItem('user')
-      if (savedUser) {
-        const userData = JSON.parse(savedUser)
-        setUser(userData)
-      }
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
     } catch (error) {
       console.error('Error updating user:', error)
     }

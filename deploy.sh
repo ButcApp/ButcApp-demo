@@ -1,378 +1,142 @@
 #!/bin/bash
 
-# ButcApp Deployment Script
-# Debian/Ubuntu VPS için otomatik kurulum script'i
+# ButcApp Production Deployment Script
+# Ubuntu VPS için deployment script'i
 
-set -e  # Hata durumunda script'i durdur
+echo "🚀 ButcApp Production Deployment Başlatılıyor..."
 
-echo "🚀 ButcApp Deployment Başlatılıyor..."
-
-# Renkler
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Log fonksiyonu
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
-}
-
-error() {
-    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] HATA: $1${NC}"
-    exit 1
-}
-
-warning() {
-    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] UYARI: $1${NC}"
-}
-
-info() {
-    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] BİLGİ: $1${NC}"
-}
-
-# 1. Sistem Kontrolü
-log "Sistem kontrol ediliyor..."
-if [[ $EUID -ne 0 ]]; then
-   error "Bu script root olarak çalıştırılmalıdır. 'sudo ./deploy.sh' komutunu kullanın."
-fi
-
-# 2. Sistem Güncelleme
-log "Sistem paketleri güncelleniyor..."
-apt update && apt upgrade -y
-
-# 3. Node.js 20.x LTS Kurulumu
-log "Node.js 20.x LTS kurulumu..."
-if ! command -v node &> /dev/null; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    apt-get install -y nodejs
-else
-    NODE_VERSION=$(node --version)
-    info "Node.js zaten kurulu: $NODE_VERSION"
-fi
-
-# 4. Gerekli Paketler
-log "Gerekli paketler kuruluyor..."
-apt install -y git build-essential python3 python3-pip
-
-# 5. Proje Dizini
+# 1. DEĞİŞKENLER
 PROJECT_DIR="/var/www/butcapp"
-log "Proje dizini kontrol ediliyor: $PROJECT_DIR"
+DOMAIN="your-domain.com"  # DEĞİŞTİR: Kendi domain'inizi girin
+DB_USER="username"       # DEĞİŞTİR: PostgreSQL kullanıcı adı
+DB_NAME="butcapp_db"     # DEĞİŞTİR: Veritabanı adı
+SSL_CERT_PATH="/path/to/your/certificate.crt"    # DEĞİŞTİR
+SSL_KEY_PATH="/path/to/your/private.key"        # DEĞİŞTİR
 
+# 2. PROJE KURULUMU
+echo "📁 Proje dizini kontrol ediliyor..."
 if [ ! -d "$PROJECT_DIR" ]; then
-    log "Proje dizini oluşturuluyor..."
-    mkdir -p $PROJECT_DIR
+    echo "❌ Proje dizini bulunamadı: $PROJECT_DIR"
+    echo "Lütfen önce projeyi $PROJECT_DIR dizinine kopyalayın"
+    exit 1
 fi
 
 cd $PROJECT_DIR
 
-# 6. Git Clone veya Update
-if [ ! -d ".git" ]; then
-    log "Proje GitHub'dan klonlanıyor..."
-    git clone https://github.com/ButcApp/ButcApp-demo.git .
-else
-    log "Proje güncelleniyor..."
-    git fetch origin
-    git reset --hard origin/master
-    git pull origin master
+# 3. NODE.JS KURULUMU (eğer kurulu değilse)
+if ! command -v node &> /dev/null; then
+    echo "📦 Node.js kuruluyor..."
+    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    sudo apt-get install -y nodejs
 fi
 
-# 7. Node.js Versiyon Kontrolü
-NODE_VERSION=$(node --version)
-REQUIRED_VERSION="v20"
-if [[ $NODE_VERSION != $REQUIRED_VERSION* ]]; then
-    warning "Node.js versiyonu uyuşmuyor: $NODE_VERSION (Gerekli: $REQUIRED_VERSION.x)"
+# 4. PM2 KURULUMU
+if ! command -v pm2 &> /dev/null; then
+    echo "📦 PM2 kuruluyor..."
+    sudo npm install -g pm2
 fi
 
-# 8. NPM Cache Temizliği ve Kurulum
-log "NPM cache temizleniyor ve bağımlılıklar kuruluyor..."
-npm cache clean --force
-rm -rf node_modules package-lock.json
+# 5. POSTGRESQL KURULUMU (eğer kurulu değilse)
+if ! command -v psql &> /dev/null; then
+    echo "📦 PostgreSQL kuruluyor..."
+    sudo apt update
+    sudo apt install -y postgresql postgresql-contrib
+    sudo systemctl start postgresql
+    sudo systemctl enable postgresql
+    
+    # Veritabanı ve kullanıcı oluşturma
+    sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD 'your_password';"
+    sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;"
+fi
 
-# Production için bağımlılıkları kur
-log "Production bağımlılıkları kuruluyor..."
-npm ci --only=production
+# 6. NGINX KURULUMU VE YAPILANDIRMA
+if ! command -v nginx &> /dev/null; then
+    echo "📦 Nginx kuruluyor..."
+    sudo apt update
+    sudo apt install -y nginx
+    sudo systemctl start nginx
+    sudo systemctl enable nginx
+fi
 
-# Tüm bağımlılıkları kur (build için)
-npm install
+echo "⚙️ Nginx yapılandırması yapılıyor..."
+sudo cp nginx/butcapp.conf /etc/nginx/sites-available/butcapp
+sudo sed -i "s/your-domain.com/$DOMAIN/g" /etc/nginx/sites-available/butcapp
+sudo sed -i "s|/path/to/your/certificate.crt|$SSL_CERT_PATH|g" /etc/nginx/sites-available/butcapp
+sudo sed -i "s|/path/to/your/private.key|$SSL_KEY_PATH|g" /etc/nginx/sites-available/butcapp
 
-# 9. Environment Variables
-log "Environment variables ayarlanıyor..."
-cat > .env.production << EOF
-NODE_ENV=production
-NEXT_PUBLIC_APP_URL=https://butcapp.com
-PORT=3000
-EOF
+sudo ln -sf /etc/nginx/sites-available/butcapp /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
 
-# 10. Build İşlemi
-log "Next.js build işlemi başlatılıyor..."
+# 7. LOG KLASÖRLERİNİ OLUŞTUR
+echo "📝 Log klasörleri oluşturuluyor..."
+sudo mkdir -p /var/log/butcapp
+sudo chown -R www-data:www-data /var/log/butcapp
+
+# 8. DEPENDENCIES KURULUMU
+echo "📦 Node.js dependencies kuruluyor..."
+npm install --production
+
+# 9. VERİTABANI MİGRASYONU
+echo "🗄️ Veritabanı migrasyonu yapılıyor..."
+PGPASSWORD="your_password" psql -h localhost -U $DB_USER -d $DB_NAME -f migration.sql
+
+# 10. PROJE DERLEME
+echo "🔨 Proje derleniyor..."
 npm run build
 
-if [ $? -ne 0 ]; then
-    error "Build işlemi başarısız oldu!"
-fi
+# 11. PM2 BAŞLATMA
+echo "🚀 PM2 ile uygulama başlatılıyor..."
+pm2 stop butcapp 2>/dev/null || true
+pm2 delete butcapp 2>/dev/null || true
 
-# 11. PM2 Kurulumu
-log "PM2 kurulumu ve yapılandırması..."
-if ! command -v pm2 &> /dev/null; then
-    npm install -g pm2
-fi
+# Environment variables'ı güncelle
+sed -i "s/username:password@localhost:5432/$DB_USER:your_password@localhost:5432/g" ecosystem.config.js
+sed -i "s/butcapp_db/$DB_NAME/g" ecosystem.config.js
 
-# PM2 ecosystem dosyası
-cat > ecosystem.config.js << EOF
-module.exports = {
-  apps: [{
-    name: 'butcapp',
-    script: 'npm',
-    args: 'start',
-    cwd: '$PROJECT_DIR',
-    instances: 'max',
-    exec_mode: 'cluster',
-    env: {
-      NODE_ENV: 'production',
-      PORT: 3000
-    },
-    error_file: '/var/log/butcapp-error.log',
-    out_file: '/var/log/butcapp-out.log',
-    log_file: '/var/log/butcapp-combined.log',
-    time: true,
-    max_memory_restart: '1G',
-    node_args: '--max_old_space_size=1024',
-    watch: false,
-    ignore_watch: ['node_modules', '.next', '.git'],
-    restart_delay: 4000
-  }]
-};
-EOF
-
-# Log dizinleri
-mkdir -p /var/log
-touch /var/log/butcapp-error.log
-touch /var/log/butcapp-out.log
-touch /var/log/butcapp-combined.log
-chown www-data:www-data /var/log/butcapp*.log
-
-# 12. PM2 Başlatma
-log "PM2 ile uygulama başlatılıyor..."
-pm2 start ecosystem.config.js
+pm2 start ecosystem.config.js --env production
 pm2 save
-pm2 startup
 
-# 13. Nginx Kurulumu
-log "Nginx kurulumu ve yapılandırması..."
-if ! command -v nginx &> /dev/null; then
-    apt install nginx -y
-    systemctl start nginx
-    systemctl enable nginx
-fi
+# 12. PM2 STARTUP KURULUMU
+echo "🔧 PM2 startup ayarlanıyor..."
+pm2 startup | sudo bash
 
-# Nginx config
-cat > /etc/nginx/sites-available/butcapp << EOF
-server {
-    listen 80;
-    server_name butcapp.com www.butcapp.com;
+# 13. SİSTEM SERVİSLERİ
+echo "⚙️ Sistem servisleri ayarlanıyor..."
+sudo systemctl enable pm2-root 2>/dev/null || sudo systemctl enable pm2-user 2>/dev/null || true
+sudo systemctl start pm2-root 2>/dev/null || sudo systemctl start pm2-user 2>/dev/null || true
 
-    # Redirect to HTTPS
-    return 301 https://\$server_name\$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name butcapp.com www.butcapp.com;
-
-    # SSL configuration (will be updated by Certbot)
-    ssl_certificate /etc/letsencrypt/live/butcapp.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/butcapp.com/privkey.pem;
-    
-    # SSL security settings
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
-    add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
-
-    # Gzip compression
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_proxied expired no-cache no-store private must-revalidate auth;
-    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/javascript;
-
-    # Proxy to Next.js app
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-        
-        # Timeout settings
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-
-    # Static files caching
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)\$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        proxy_pass http://localhost:3000;
-    }
-
-    # Health check
-    location /health {
-        access_log off;
-        return 200 "healthy\\n";
-        add_header Content-Type text/plain;
-    }
-}
-EOF
-
-# Site'ı aktif et
-ln -sf /etc/nginx/sites-available/butcapp /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-
-# Nginx test
-nginx -t
-
-if [ $? -ne 0 ]; then
-    error "Nginx yapılandırma hatası!"
-fi
-
-systemctl restart nginx
-
-# 14. SSL Sertifikası (Let's Encrypt)
-log "SSL sertifikası kuruluyor..."
-if ! command -v certbot &> /dev/null; then
-    apt install certbot python3-certbot-nginx -y
-fi
-
-# SSL otomatik yenileme
-crontab -l | { cat; echo "0 12 * * * /usr/bin/certbot renew --quiet"; } | crontab -
-
-# 15. Firewall Ayarları
-log "Firewall ayarları yapılıyor..."
-if command -v ufw &> /dev/null; then
-    ufw allow ssh
-    ufw allow 80
-    ufw allow 443
-    ufw --force enable
-else
-    warning "UFW bulunamadı. Manuel olarak firewall ayarlarını yapın."
-fi
-
-# 16. İzinler
-log "Dosya izinleri ayarlanıyor..."
-chown -R www-data:www-data $PROJECT_DIR
-chmod -R 755 $PROJECT_DIR
-
-# 17. Servislerin Durumu
-log "Servisler kontrol ediliyor..."
-systemctl status nginx --no-pager -l
+# 14. KONTROLLER
+echo "🔍 Kontroller yapılıyor..."
+echo "PM2 Status:"
 pm2 status
 
-# 18. Test
-log "Uygulama test ediliyor..."
-sleep 5
-
-if curl -f http://localhost:3000 > /dev/null 2>&1; then
-    log "✅ Next.js uygulaması çalışıyor"
-else
-    error "❌ Next.js uygulaması çalışmıyor!"
-fi
-
-if curl -f http://localhost > /dev/null 2>&1; then
-    log "✅ Nginx çalışıyor"
-else
-    error "❌ Nginx çalışmıyor!"
-fi
-
-# 19. Monitor Script'i
-log "Monitor script'i oluşturuluyor..."
-cat > /home/monitor-butcapp.sh << 'EOF'
-#!/bin/bash
-
-# ButcApp monitor script'i
-if ! pm2 list | grep -q "butcapp.*online"; then
-    echo "$(date): ButcApp çalışmıyor, yeniden başlatılıyor..."
-    cd /var/www/butcapp
-    pm2 start ecosystem.config.js
-fi
-
-if ! systemctl is-active --quiet nginx; then
-    echo "$(date): Nginx çalışmıyor, yeniden başlatılıyor..."
-    systemctl restart nginx
-fi
-EOF
-
-chmod +x /home/monitor-butcapp.sh
-
-# Monitor için cron job
-crontab -l | { cat; echo "*/5 * * * * /home/monitor-butcapp.sh >> /var/log/butcapp-monitor.log 2>&1"; } | crontab -
-
-# 20. Update Script'i
-log "Update script'i oluşturuluyor..."
-cat > /home/update-butcapp.sh << 'EOF'
-#!/bin/bash
-
-# ButcApp güncelleme script'i
-echo "ButcApp güncellenmeye başlanıyor..."
-
-cd /var/www/butcapp
-
-# Değişiklikleri çek
-git pull origin master
-
-# Bağımlılıkları güncelle
-npm install
-
-# Build işlemi
-npm run build
-
-# PM2 ile uygulamayı yeniden başlat
-pm2 restart butcapp
-
-echo "ButcApp başarıyla güncellendi!"
-EOF
-
-chmod +x /home/update-butcapp.sh
-
-# 21. Bilgiler
 echo ""
-log "🎉 DEPLOYMENT BAŞARILI!"
-echo ""
-info "📋 Önemli Bilgiler:"
-echo "   • Uygulama Adresi: https://butcapp.com"
-echo "   • Admin Panel: https://butcapp.com/admin"
-echo "   • Admin Login: admin@butcapp.com / admin123"
-echo "   • PM2 Durumu: pm2 status"
-echo "   • PM2 Loglar: pm2 logs butcapp"
-echo "   • Nginx Durumu: systemctl status nginx"
-echo "   • Update için: /home/update-butcapp.sh"
-echo "   • Monitor için: /home/monitor-butcapp.sh"
-echo ""
-info "🔧 Yönetim Komutları:"
-echo "   • Uygulamayı yeniden başlat: pm2 restart butcapp"
-echo "   • Uygulamayı durdur: pm2 stop butcapp"
-echo "   • Nginx yeniden başlat: systemctl restart nginx"
-echo "   • SSL yenileme: certbot renew"
-echo ""
-warning "⚠️  Unutmayın:"
-echo "   • Domain DNS ayarlarını yapmayı unutmayın!"
-echo "   • SSL sertifikası almak için domain'in sunucuya yönlendirilmesi gerekir."
-echo "   • SSL almak için: certbot --nginx -d butcapp.com -d www.butcapp.com"
-echo ""
+echo "Nginx Status:"
+sudo systemctl status nginx --no-pager -l
 
-log "Deployment tamamlandı! ✅"
+echo ""
+echo "PostgreSQL Status:"
+sudo systemctl status postgresql --no-pager -l
+
+echo ""
+echo "🌐 Uygulama test ediliyor..."
+curl -I http://localhost:3000 || echo "❌ Local test başarısız"
+
+echo ""
+echo "✅ Deployment tamamlandı!"
+echo ""
+echo "📋 SON ADIMLAR:"
+echo "1. SSL sertifikalarınızı kurun: certbot --nginx -d $DOMAIN"
+echo "2. Domain DNS ayarlarınızı kontrol edin"
+echo "3. Environment variables'ı güncelleyin:"
+echo "   - Database şifresi"
+echo "   - SSL certificate path'leri"
+echo "4. Firewall ayarları:"
+echo "   sudo ufw allow 22"
+echo "   sudo ufw allow 80"
+echo "   sudo ufw allow 443"
+echo "   sudo ufw enable"
+echo ""
+echo "🎉 Uygulamanız hazır: https://$DOMAIN"

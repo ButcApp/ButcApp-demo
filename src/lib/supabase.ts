@@ -1,16 +1,27 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabaseUrl = 'https://uizazhyshhazgmqrzxfq.supabase.co'
+const supabaseAnonKey = process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-// Public client for client-side usage
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Client-side için client (cookie handling olmadan)
+export const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  }
+})
 
-// Service role client for server-side usage (admin privileges)
-// Note: This should only be used in server-side code (API routes)
-export const supabaseAdmin = createClient(
+// Server-side için service role client
+export const supabaseAdmin = createSupabaseClient(
   supabaseUrl, 
-  process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+  process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
 )
 
 export type Database = {

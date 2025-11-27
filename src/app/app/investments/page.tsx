@@ -17,7 +17,7 @@ import { PieChart } from '@/components/charts/PieChart'
 import { ProfitChart } from '@/components/charts/ProfitChart'
 import { SummaryStatistics } from '@/components/SummaryStatistics'
 import { useLanguage } from '@/contexts/LanguageContext'
-import { supabase } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase-client'
 import { calculateInvestmentProfit, calculateTotalProfit, formatProfitDetails } from '@/lib/investment-calculator'
 import Link from 'next/link'
 
@@ -189,6 +189,7 @@ export default function InvestmentsPage() {
         }
       } catch (error) {
         console.error('User check error:', error)
+        setInvestments([])
       } finally {
         setIsLoadingUser(false)
       }
@@ -540,11 +541,19 @@ export default function InvestmentsPage() {
 
   // Create investment
   const createInvestment = async () => {
-    if (!selectedCurrency || investmentForm.amount <= 0 || !user) {
+    // Önce Supabase'den mevcut kullanıcıyı al
+    const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser()
+    
+    if (userError || !currentUser) {
+      console.error('No authenticated user found:', userError)
+      return
+    }
+
+    if (!selectedCurrency || investmentForm.amount <= 0) {
       console.error('Missing required fields:', {
         selectedCurrency: !!selectedCurrency,
         amount: investmentForm.amount,
-        user: !!user
+        user: !!currentUser
       })
       return
     }
@@ -554,7 +563,7 @@ export default function InvestmentsPage() {
       const buyPrice = historicalPrice || selectedCurrency.price
       
       const requestData = {
-        userId: user.id,
+        userId: currentUser.id, // Doğrudan Supabase user ID'si
         currency: selectedCurrency.symbol,
         currencyName: selectedCurrency.name,
         amount: investmentForm.amount,
@@ -563,7 +572,7 @@ export default function InvestmentsPage() {
       }
 
       console.log('Creating investment with data:', {
-        user: { id: user.id, email: user.email },
+        user: { id: currentUser.id, email: currentUser.email },
         selectedCurrency: selectedCurrency,
         investmentForm,
         buyPrice,
@@ -588,7 +597,7 @@ export default function InvestmentsPage() {
       
       if (result.success) {
         // Refresh investments list
-        await fetchInvestments(user.id)
+        await fetchInvestments(currentUser.id)
         
         setShowInvestmentDialog(false)
         setInvestmentForm({
@@ -663,7 +672,7 @@ export default function InvestmentsPage() {
       
       if (result.success) {
         // Refresh investments list
-        await fetchInvestments(user.id)
+        await fetchInvestments(currentUser.id)
         
         // Reset form and close dialog
         setManualCryptoForm({
