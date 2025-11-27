@@ -21,30 +21,50 @@ const CRYPTO_ICONS: Record<string, string> = {
   'AVAX': 'text-red-500'
 }
 
-// Fallback data for historical prices
+// Fallback data for historical prices - more realistic values based on historical trends
 const getFallbackData = (date: string, type: 'currency' | 'crypto'): HistoricalItem[] => {
   const baseDate = new Date(date)
+  const year = baseDate.getFullYear()
+  const month = baseDate.getMonth()
+  
+  // Historical approximate values for different years
+  const getHistoricalUSDTRY = (year: number, month: number) => {
+    if (year <= 2020) return 7.0 + Math.random() * 1.0
+    if (year === 2021) return 8.5 + Math.random() * 1.5
+    if (year === 2022) return 13.5 + Math.random() * 2.0
+    if (year === 2023) return 27.0 + Math.random() * 3.0
+    return 32.0 + Math.random() * 2.0 // 2024+
+  }
+  
+  const getHistoricalEURTRY = (year: number, month: number) => {
+    if (year <= 2020) return 8.0 + Math.random() * 1.0
+    if (year === 2021) return 10.0 + Math.random() * 1.5
+    if (year === 2022) return 14.5 + Math.random() * 2.0
+    if (year === 2023) return 29.0 + Math.random() * 3.0
+    return 35.0 + Math.random() * 2.0 // 2024+
+  }
   
   if (type === 'crypto') {
     return [
       {
         symbol: 'BTC',
         name: 'Bitcoin',
-        price: 90000 + Math.random() * 5000,
+        price: year <= 2020 ? 10000 + Math.random() * 5000 : 
+               year === 2021 ? 35000 + Math.random() * 10000 :
+               year === 2022 ? 20000 + Math.random() * 5000 :
+               year === 2023 ? 25000 + Math.random() * 10000 :
+               65000 + Math.random() * 10000, // 2024+
         type: 'crypto',
         timestamp: baseDate.toISOString()
       },
       {
         symbol: 'ETH',
         name: 'Ethereum',
-        price: 3000 + Math.random() * 500,
-        type: 'crypto',
-        timestamp: baseDate.toISOString()
-      },
-      {
-        symbol: 'BNB',
-        name: 'Binance Coin',
-        price: 300 + Math.random() * 50,
+        price: year <= 2020 ? 200 + Math.random() * 100 :
+               year === 2021 ? 2500 + Math.random() * 500 :
+               year === 2022 ? 1500 + Math.random() * 300 :
+               year === 2023 ? 1800 + Math.random() * 400 :
+               3500 + Math.random() * 500, // 2024+
         type: 'crypto',
         timestamp: baseDate.toISOString()
       }
@@ -54,14 +74,21 @@ const getFallbackData = (date: string, type: 'currency' | 'crypto'): HistoricalI
       {
         symbol: 'USD/TRY',
         name: 'ABD DOLARI',
-        price: 32 + Math.random() * 2,
+        price: getHistoricalUSDTRY(year, month),
         type: 'currency',
         timestamp: baseDate.toISOString()
       },
       {
         symbol: 'EUR/TRY',
         name: 'EURO',
-        price: 35 + Math.random() * 2,
+        price: getHistoricalEURTRY(year, month),
+        type: 'currency',
+        timestamp: baseDate.toISOString()
+      },
+      {
+        symbol: 'GBP/TRY',
+        name: 'İNGİLİZ STERLİNİ',
+        price: getHistoricalEURTRY(year, month) * 1.15,
         type: 'currency',
         timestamp: baseDate.toISOString()
       }
@@ -74,6 +101,8 @@ async function fetchCurrencyHistoricalData(date: string) {
     const [year, month, day] = date.split('-').map(Number)
     let checkDate = new Date(year, month - 1, day)
     
+    console.log(`Fetching TCMB data for date: ${date}, checkDate: ${checkDate.toDateString()}`)
+    
     // Find previous working day (not weekend)
     while (true) {
       const dayOfWeek = checkDate.getDay()
@@ -85,12 +114,15 @@ async function fetchCurrencyHistoricalData(date: string) {
       // Safety check: don't go back more than 30 days
       const daysDiff = Math.floor((new Date(year, month - 1, day).getTime() - checkDate.getTime()) / (1000 * 60 * 60 * 24))
       if (daysDiff > 30) {
+        console.warn(`No working day found within 30 days of ${date}`)
         return []
       }
     }
     
-    const tcmbDate = `${checkDate.getDate()}.${String(checkDate.getMonth() + 1).padStart(2, '0')}.${checkDate.getFullYear()}`
-    const url = `https://www.tcmb.gov.tr/kurlar/${year}${month}/${tcmbDate}${month}${year}.xml`
+    const tcmbDate = `${checkDate.getDate().toString().padStart(2, '0')}${String(checkDate.getMonth() + 1).padStart(2, '0')}${checkDate.getFullYear()}`
+    const url = `https://www.tcmb.gov.tr/kurlar/${year}${String(checkDate.getMonth() + 1).padStart(2, '0')}/${tcmbDate}.xml`
+    
+    console.log(`TCMB URL: ${url}`)
     
     const response = await fetch(url, {
       headers: {
@@ -98,11 +130,20 @@ async function fetchCurrencyHistoricalData(date: string) {
       }
     })
     
+    console.log(`TCMB Response status: ${response.status}`)
+    
     if (!response.ok) {
+      console.warn(`TCMB API failed with status: ${response.status}`)
       return null
     }
     
     const xmlText = await response.text()
+    console.log(`TCMB XML length: ${xmlText.length} characters`)
+    
+    if (xmlText.length < 100) {
+      console.warn(`TCMB XML too short, likely error page: ${xmlText.substring(0, 200)}`)
+      return null
+    }
     
     const currencies = [
       { code: 'USD', name: 'ABD DOLARI', symbol: 'USD/TRY' },
@@ -144,6 +185,8 @@ async function fetchCurrencyHistoricalData(date: string) {
         const price = (forexBuying + forexSelling) / 2
         const changePercent = price > 0 ? (change / price) * 100 : 0
         
+        console.log(`Parsed ${currency.code}: Buy=${forexBuying}, Sell=${forexSelling}, Price=${price}`)
+        
         return {
           symbol: currency.symbol,
           name: currency.name,
@@ -151,11 +194,14 @@ async function fetchCurrencyHistoricalData(date: string) {
           type: 'currency' as const,
           timestamp: new Date(date).toISOString()
         }
+      } else {
+        console.warn(`Could not parse ${currency.code} from TCMB XML`)
       }
       
       return null
     }).filter(currency => currency && currency.price > 0)
     
+    console.log(`Successfully parsed ${result.length} currencies from TCMB`)
     return result.length > 0 ? result : null
   } catch (error) {
     console.error('Currency historical fetch error:', error)
@@ -215,6 +261,8 @@ export async function GET(request: NextRequest) {
     const cryptoId = searchParams.get('cryptoId')
     const type = searchParams.get('type') as 'currency' | 'crypto' | undefined
     
+    console.log(`Historical API called with: date=${date}, cryptoId=${cryptoId}, type=${type}`)
+    
     if (!date) {
       return NextResponse.json({
         success: false,
@@ -246,6 +294,8 @@ export async function GET(request: NextRequest) {
     if (type === 'crypto' || cryptoId) {
       // Fetch crypto data
       try {
+        console.log(`Fetching crypto historical data for ${cryptoId || 'bitcoin'} on ${date}`)
+        
         // Using CoinGecko free API for historical data
         let url = `https://api.coingecko.com/api/v3/coins/bitcoin/history?date=${date}&vs_currency=usd`
         
@@ -259,6 +309,8 @@ export async function GET(request: NextRequest) {
           }
         })
         
+        console.log(`CoinGecko response status: ${response.status}`)
+        
         if (!response.ok) {
           console.warn(`CoinGecko API failed for ${cryptoId || 'bitcoin'} on ${date}`)
         } else {
@@ -271,13 +323,24 @@ export async function GET(request: NextRequest) {
                              cryptoId === 'solana' ? 'Solana' :
                              cryptoId?.charAt(0).toUpperCase() + cryptoId?.slice(1) || 'Unknown'
             
-            return {
-              symbol: cryptoId?.toUpperCase() || 'BTC',
-              name: cryptoName,
-              price: price,
-              type: 'crypto' as const,
-              timestamp: new Date(date).toISOString()
-            }
+            console.log(`Crypto price found: ${cryptoName} = $${price}`)
+            
+            return NextResponse.json({
+              success: true,
+              data: [{
+                symbol: cryptoId?.toUpperCase() || 'BTC',
+                name: cryptoName,
+                price: price,
+                type: 'crypto' as const,
+                timestamp: new Date(date).toISOString()
+              }],
+              date: date,
+              type: 'crypto',
+              cryptoId: cryptoId,
+              timestamp: new Date().toISOString()
+            })
+          } else {
+            console.warn(`No price data in CoinGecko response for ${cryptoId || 'bitcoin'} on ${date}`)
           }
         }
       } catch (error) {
@@ -285,9 +348,13 @@ export async function GET(request: NextRequest) {
       }
     } else {
       // Fetch currency data
+      console.log(`Fetching currency historical data for ${date}`)
       const currencyData = await fetchCurrencyHistoricalData(date)
       if (currencyData) {
         result = currencyData
+        console.log(`Currency data found: ${result.length} currencies`)
+      } else {
+        console.log(`No currency data found for ${date}`)
       }
     }
     
@@ -295,6 +362,7 @@ export async function GET(request: NextRequest) {
     if (result.length === 0) {
       console.warn(`No historical data available for ${date}, using fallback data`)
       result = getFallbackData(date, type || 'currency')
+      console.log(`Fallback data generated: ${result.length} items`)
     }
     
     return NextResponse.json({

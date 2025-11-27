@@ -467,6 +467,8 @@ export default function InvestmentsPage() {
   const fetchHistoricalPrice = async (date: string, currencyCode: string, type: 'currency' | 'crypto') => {
     setIsLoadingHistorical(true)
     try {
+      console.log(`🔍 Fetching historical price for ${currencyCode} on ${date} (type: ${type})`)
+      
       let response
       
       if (type === 'crypto') {
@@ -479,24 +481,53 @@ export default function InvestmentsPage() {
       
       const result = await response.json()
       
+      console.log(`📊 Historical API response:`, {
+        success: result.success,
+        dataLength: result.data?.length,
+        currencyCode,
+        type,
+        date,
+        sampleData: result.data?.slice(0, 2)
+      })
+      
       if (result.success && result.data && result.data.length > 0) {
         // Find the specific item in the data
         let historicalItem
         if (type === 'crypto') {
           historicalItem = result.data.find((c: any) => c.symbol.toLowerCase() === currencyCode.toLowerCase())
         } else {
+          // For currency, try exact match first, then try alternative formats
           historicalItem = result.data.find((c: any) => c.symbol === currencyCode)
+          
+          if (!historicalItem) {
+            // Try with common variations
+            const variations = [
+              currencyCode,
+              `${currencyCode}/TRY`,
+              currencyCode.replace('/TRY', ''),
+              currencyCode.replace('TRY/', '')
+            ]
+            
+            for (const variation of variations) {
+              historicalItem = result.data.find((c: any) => c.symbol === variation)
+              if (historicalItem) {
+                console.log(`✅ Found currency using variation: ${variation}`)
+                break
+              }
+            }
+          }
         }
         
         if (historicalItem) {
           setHistoricalPrice(historicalItem.price)
-          console.log(`Historical price found for ${currencyCode}: $${historicalItem.price}`)
+          console.log(`✅ Historical price found for ${currencyCode}: ${type === 'crypto' ? '$' : '₺'}${historicalItem.price}`)
         } else {
-          console.warn(`No historical price found for ${currencyCode}`)
+          console.warn(`❌ No historical price found for ${currencyCode} in ${result.data.length} items`)
+          console.log(`Available symbols:`, result.data.map((c: any) => c.symbol))
           setHistoricalPrice(null)
         }
       } else {
-        console.warn(`No historical data available for ${date}`)
+        console.warn(`❌ No historical data available for ${date}:`, result.error || 'Unknown error')
         setHistoricalPrice(null)
       }
     } catch (error) {

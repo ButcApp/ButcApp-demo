@@ -13,6 +13,8 @@ export async function GET(request: NextRequest) {
       }, { status: 400 })
     }
 
+    console.log(`📊 Fetching investments for user: ${userId}`)
+
     const { data, error } = await supabaseAdmin
       .from('investments')
       .select('*')
@@ -20,7 +22,7 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Supabase error:', error)
+      console.error('❌ Supabase error:', error)
       return NextResponse.json({
         success: false,
         error: 'Failed to fetch investments',
@@ -28,6 +30,8 @@ export async function GET(request: NextRequest) {
       }, { status: 500 })
     }
 
+    console.log(`✅ Successfully fetched ${data?.length || 0} investments from Supabase`)
+    
     return NextResponse.json({
       success: true,
       data: data || [],
@@ -36,7 +40,7 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Investments GET error:', error)
+    console.error('❌ Investments GET error:', error)
     return NextResponse.json({
       success: false,
       error: 'Internal server error',
@@ -50,7 +54,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { userId, currency, currencyName, amount, buyPrice, buyDate, sellPrice, sellDate, status } = body
 
-    console.log('POST /api/investments - Request body:', {
+    console.log('📝 POST /api/investments - Request body:', {
       userId,
       currency,
       currencyName,
@@ -63,7 +67,7 @@ export async function POST(request: NextRequest) {
     })
 
     if (!userId || !currency || !currencyName || !amount || !buyPrice || !buyDate) {
-      console.error('Missing required fields:', {
+      console.error('❌ Missing required fields:', {
         hasUserId: !!userId,
         hasCurrency: !!currency,
         hasCurrencyName: !!currencyName,
@@ -94,12 +98,10 @@ export async function POST(request: NextRequest) {
       current_value: currentValue,
       profit,
       profit_percent: profitPercent,
-      status: status || 'active',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      status: status || 'active'
     }
 
-    console.log('Insert data prepared:', insertData)
+    console.log('💾 Insert data prepared:', insertData)
 
     const { data, error } = await supabaseAdmin
       .from('investments')
@@ -108,7 +110,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Supabase insert error:', {
+      console.error('❌ Supabase insert error:', {
         error,
         message: error.message,
         details: error.details,
@@ -122,7 +124,7 @@ export async function POST(request: NextRequest) {
       }, { status: 500 })
     }
 
-    console.log('Investment created successfully:', data)
+    console.log('✅ Investment created successfully:', data)
 
     return NextResponse.json({
       success: true,
@@ -132,7 +134,7 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Investments POST error:', error)
+    console.error('❌ Investments POST error:', error)
     return NextResponse.json({
       success: false,
       error: 'Internal server error',
