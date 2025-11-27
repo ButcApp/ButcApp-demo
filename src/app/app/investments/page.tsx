@@ -118,8 +118,11 @@ export default function InvestmentsPage() {
   
   // Crypto states
   const [cryptoData, setCryptoData] = useState<CryptoItem[]>([])
+  const [displayedCryptos, setDisplayedCryptos] = useState<CryptoItem[]>([])
   const [isLoadingCrypto, setIsLoadingCrypto] = useState(false)
   const [cryptoLastUpdated, setCryptoLastUpdated] = useState<Date | null>(null)
+  const [cryptoVisibleCount, setCryptoVisibleCount] = useState(8)
+  const [cryptoHasMore, setCryptoHasMore] = useState(true)
   
   // Investment filter states
   const [investmentFilter, setInvestmentFilter] = useState<'all' | 'currency' | 'crypto' | 'commodity'>('all')
@@ -422,6 +425,8 @@ export default function InvestmentsPage() {
           icon: <Bitcoin className={`w-5 h-5 ${item.icon || 'text-gray-500'}`} />
         }))
         setCryptoData(data)
+        setDisplayedCryptos(data.slice(0, cryptoVisibleCount))
+        setCryptoHasMore(data.length > cryptoVisibleCount)
         setCryptoLastUpdated(new Date())
       } else {
         console.error('Failed to fetch crypto data:', result.error)
@@ -582,6 +587,14 @@ export default function InvestmentsPage() {
     setHasMore(currencyData.length > newCount)
   }
 
+  const loadMoreCryptos = () => {
+    const newCount = cryptoVisibleCount + 8
+    const newDisplayed = cryptoData.slice(0, newCount)
+    setDisplayedCryptos(newDisplayed)
+    setCryptoVisibleCount(newCount)
+    setCryptoHasMore(cryptoData.length > newCount)
+  }
+
   useEffect(() => {
     fetchCurrencyData()
     fetchCryptoData()
@@ -604,6 +617,15 @@ export default function InvestmentsPage() {
       setHasMore(currencyData.length > visibleCount)
     }
   }, [currencyData, visibleCount])
+
+  // Update displayed cryptos when visible count changes
+  useEffect(() => {
+    if (cryptoData.length > 0) {
+      const newDisplayed = cryptoData.slice(0, cryptoVisibleCount)
+      setDisplayedCryptos(newDisplayed)
+      setCryptoHasMore(cryptoData.length > cryptoVisibleCount)
+    }
+  }, [cryptoData, cryptoVisibleCount])
 
   // Update investment filter when tab changes
   useEffect(() => {
@@ -803,8 +825,11 @@ export default function InvestmentsPage() {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
         <div className="min-w-0 flex-1">
           <h3 className="text-lg font-semibold truncate">Kripto Paralar</h3>
+          <p className="text-sm text-muted-foreground">
+            {cryptoData.length > 0 ? `Gösterilen: ${displayedCryptos.length} / ${cryptoData.length}` : 'Yükleniyor...'}
+          </p>
           {cryptoLastUpdated && (
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground">
               Son güncelleme: {cryptoLastUpdated.toLocaleTimeString('tr-TR')}
             </p>
           )}
@@ -812,65 +837,100 @@ export default function InvestmentsPage() {
         <Button 
           variant="outline" 
           size="sm" 
-          className="shrink-0"
           onClick={fetchCryptoData}
           disabled={isLoadingCrypto}
+          className="shrink-0"
         >
           <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingCrypto ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Yenile</span>
-          <span className="sm:hidden">↻</span>
+          <span className="hidden sm:inline">{isLoadingCrypto ? 'Yenileniyor...' : 'Yenile'}</span>
+          <span className="sm:hidden">{isLoadingCrypto ? '...' : '↻'}</span>
         </Button>
       </div>
-      {isLoadingCrypto ? (
-        <div className="flex justify-center py-8">
-          <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {data.map((item) => (
-            <Card key={item.symbol} className="p-4 hover:shadow-md transition-shadow duration-200">
-              <div className="space-y-4">
-                <div className="flex items-start space-x-3">
-                  <div className="p-2 bg-primary/10 rounded-lg shrink-0">
-                    {item.icon}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-base sm:text-lg truncate" title={item.symbol}>{item.symbol}</div>
-                    <div className="text-sm text-muted-foreground truncate" title={item.name}>{item.name}</div>
-                    <div className="text-xs text-muted-foreground mt-2 space-y-1">
-                      <div className="truncate" title={`Hacim: ${item.volume}`}>
-                        <span className="font-medium">Hacim:</span> ${item.volume}
-                      </div>
-                      <div className="truncate" title={`Piyasa Değeri: ${item.marketCap}`}>
-                        <span className="font-medium">Piyasa:</span> ${item.marketCap}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="font-bold text-lg sm:text-xl text-foreground whitespace-nowrap" title={`Fiyat: $${formatPrice(item.price)}`}>
-                    ${formatPrice(item.price)}
-                  </div>
-                  <div className={`flex items-center justify-end space-x-1 mt-1 ${
-                    item.change >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                  }`}>
-                    {item.change >= 0 ? (
-                      <ArrowUpRight className="w-4 h-4 shrink-0" />
-                    ) : (
-                      <ArrowDownRight className="w-4 h-4 shrink-0" />
-                    )}
-                    <span className="text-sm font-medium"
-                      title={`Değişim: ${item.change >= 0 ? '+' : ''}${formatPrice(item.change)} (${item.changePercent >= 0 ? '+' : ''}${item.changePercent}%)`}
-                    >
-                      {item.change >= 0 ? '+' : ''}{formatPrice(item.change)} ({item.changePercent >= 0 ? '+' : ''}{item.changePercent}%)
-                    </span>
-                </div>
-              </div>
+      <div className="grid gap-4">
+        {data.length === 0 ? (
+          <Card className="p-8">
+            <div className="text-center text-muted-foreground">
+              <RefreshCw className="w-8 h-8 mx-auto mb-2 animate-spin" />
+              <p>Kripto verileri yükleniyor...</p>
             </div>
           </Card>
-        ))}
-        </div>
-      )}
+        ) : (
+          <>
+            {data.map((item) => (
+              <Card key={item.symbol} className="p-4 hover:shadow-md transition-shadow duration-200">
+                <div className="space-y-4">
+                  {/* Sol taraf - Kripto bilgileri */}
+                  <div className="flex items-start space-x-3">
+                    <div className="p-2 bg-primary/10 rounded-lg shrink-0">
+                      {item.icon}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-base sm:text-lg truncate" title={item.symbol}>{item.symbol}</div>
+                      <div className="text-sm text-muted-foreground truncate" title={item.name}>{item.name}</div>
+                      {item.volume && item.marketCap && (
+                        <div className="text-xs text-muted-foreground mt-2 space-y-1">
+                          <div className="truncate" title={`Hacim: ${item.volume}`}>
+                            <span className="font-medium">Hacim:</span> ${item.volume}
+                          </div>
+                          <div className="truncate" title={`Piyasa Değeri: ${item.marketCap}`}>
+                            <span className="font-medium">Piyasa:</span> ${item.marketCap}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Sağ taraf - Fiyat ve işlem */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex-1 sm:flex-none">
+                      <div className="text-right sm:text-left">
+                        <div className="font-bold text-lg sm:text-xl text-foreground whitespace-nowrap" title={`Fiyat: $${formatPrice(item.price)}`}>
+                          ${formatPrice(item.price)}
+                        </div>
+                        <div className={`flex items-center sm:justify-start justify-end space-x-1 mt-1 ${
+                          item.change >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          {item.change >= 0 ? (
+                            <ArrowUpRight className="w-4 h-4 shrink-0" />
+                          ) : (
+                            <ArrowDownRight className="w-4 h-4 shrink-0" />
+                          )}
+                          <span className="text-sm font-medium"
+                            title={`Değişim: ${item.change >= 0 ? '+' : ''}${formatPrice(item.change)} (${item.changePercent >= 0 ? '+' : ''}${item.changePercent.toFixed(2)}%)`}
+                          >
+                            {item.change >= 0 ? '+' : ''}{formatPrice(item.change)} ({item.changePercent >= 0 ? '+' : ''}{item.changePercent.toFixed(2)}%)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <Button 
+                      size="sm" 
+                      className="w-full sm:w-auto shrink-0"
+                      onClick={() => openInvestmentDialog(item)}
+                    >
+                      <Zap className="w-4 h-4 mr-1" />
+                      <span className="hidden sm:inline">Hızlı Yatırım</span>
+                      <span className="sm:hidden">Yatırım</span>
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+            {cryptoHasMore && (
+              <div className="flex justify-center py-4">
+                <Button 
+                  variant="outline" 
+                  onClick={loadMoreCryptos}
+                  disabled={isLoadingCrypto}
+                  className="w-full max-w-md"
+                >
+                  Daha Fazla Kripto Göster
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 
@@ -993,7 +1053,7 @@ export default function InvestmentsPage() {
           </TabsContent>
 
           <TabsContent value="crypto" className="space-y-6">
-            {renderCryptoTable(cryptoData)}
+            {renderCryptoTable(displayedCryptos)}
           </TabsContent>
 
           <TabsContent value="commodities" className="space-y-6">
