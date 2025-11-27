@@ -1,16 +1,17 @@
 #!/bin/bash
 
-# ButcApp Production Kurulum Script'i
-# Debian/Ubuntu VPS için hazırlanmıştır
+# ButcApp Deployment Script
+# Debian/Ubuntu VPS için otomatik kurulum script'i
 
-set -e
+set -e  # Hata durumunda script'i durdur
 
-echo "🚀 ButcApp Production Kurulum Başlatılıyor..."
+echo "🚀 ButcApp Deployment Başlatılıyor..."
 
-# Renkli output için
+# Renkler
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Log fonksiyonu
@@ -19,80 +20,104 @@ log() {
 }
 
 error() {
-    echo -e "${RED}[HATA] $1${NC}"
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] HATA: $1${NC}"
     exit 1
 }
 
 warning() {
-    echo -e "${YELLOW}[UYARI] $1${NC}"
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] UYARI: $1${NC}"
+}
+
+info() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] BİLGİ: $1${NC}"
 }
 
 # 1. Sistem Kontrolü
 log "Sistem kontrol ediliyor..."
-
-# Root kontrolü
 if [[ $EUID -ne 0 ]]; then
-   error "Bu script root olarak çalıştırılmalıdır!"
-fi
-
-# Debian/Ubuntu kontrolü
-if ! command -v apt &> /dev/null; then
-    error "Bu script sadece Debian/Ubuntu sistemleri için geçerlidir!"
+   error "Bu script root olarak çalıştırılmalıdır. 'sudo ./deploy.sh' komutunu kullanın."
 fi
 
 # 2. Sistem Güncelleme
-log "Sistem güncelleniyor..."
+log "Sistem paketleri güncelleniyor..."
 apt update && apt upgrade -y
 
-# 3. Gerekli Paketlerin Kurulumu
-log "Node.js 20.x LTS kuruluyor..."
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
-
-log "Diğer gerekli paketler kuruluyor..."
-apt install -y git build-essential python3 python3-pip nginx certbot python3-certbot-nginx
-
-# 4. Versiyon Kontrolü
-log "Kurulan versiyonlar kontrol ediliyor..."
-NODE_VERSION=$(node --version)
-NPM_VERSION=$(npm --version)
-log "Node.js: $NODE_VERSION"
-log "NPM: $NPM_VERSION"
-
-# 5. Proje Dizininin Oluşturulması
-log "Proje dizini oluşturuluyor..."
-mkdir -p /var/www/butcapp
-cd /var/www/butcapp
-
-# 6. GitHub Repoisunun Klonlanması
-log "GitHub reposu klonlanıyor..."
-if [ -d ".git" ]; then
-    log "Repo zaten mevcut, güncelleniyor..."
-    git pull origin master
+# 3. Node.js 20.x LTS Kurulumu
+log "Node.js 20.x LTS kurulumu..."
+if ! command -v node &> /dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt-get install -y nodejs
 else
-    log "Repo klonlanıyor..."
-    git clone https://github.com/ButcApp/ButcApp-demo.git .
+    NODE_VERSION=$(node --version)
+    info "Node.js zaten kurulu: $NODE_VERSION"
 fi
 
-# 7. Bağımlılıkların Yüklenmesi
-log "Bağımlılıklar yükleniyor..."
+# 4. Gerekli Paketler
+log "Gerekli paketler kuruluyor..."
+apt install -y git build-essential python3 python3-pip
+
+# 5. Proje Dizini
+PROJECT_DIR="/var/www/butcapp"
+log "Proje dizini kontrol ediliyor: $PROJECT_DIR"
+
+if [ ! -d "$PROJECT_DIR" ]; then
+    log "Proje dizini oluşturuluyor..."
+    mkdir -p $PROJECT_DIR
+fi
+
+cd $PROJECT_DIR
+
+# 6. Git Clone veya Update
+if [ ! -d ".git" ]; then
+    log "Proje GitHub'dan klonlanıyor..."
+    git clone https://github.com/ButcApp/ButcApp-demo.git .
+else
+    log "Proje güncelleniyor..."
+    git fetch origin
+    git reset --hard origin/master
+    git pull origin master
+fi
+
+# 7. Node.js Versiyon Kontrolü
+NODE_VERSION=$(node --version)
+REQUIRED_VERSION="v20"
+if [[ $NODE_VERSION != $REQUIRED_VERSION* ]]; then
+    warning "Node.js versiyonu uyuşmuyor: $NODE_VERSION (Gerekli: $REQUIRED_VERSION.x)"
+fi
+
+# 8. NPM Cache Temizliği ve Kurulum
+log "NPM cache temizleniyor ve bağımlılıklar kuruluyor..."
+npm cache clean --force
+rm -rf node_modules package-lock.json
+
+# Production için bağımlılıkları kur
+log "Production bağımlılıkları kuruluyor..."
+npm ci --only=production
+
+# Tüm bağımlılıkları kur (build için)
 npm install
 
-# 8. Build İşlemi
-log "Production build işlemi başlatılıyor..."
-npm run build
-
 # 9. Environment Variables
-log "Environment variables oluşturuluyor..."
+log "Environment variables ayarlanıyor..."
 cat > .env.production << EOF
 NODE_ENV=production
 NEXT_PUBLIC_APP_URL=https://butcapp.com
 PORT=3000
 EOF
 
-# 10. PM2 Kurulumu
-log "PM2 kuruluyor ve yapılandırılıyor..."
-npm install -g pm2
+# 10. Build İşlemi
+log "Next.js build işlemi başlatılıyor..."
+npm run build
+
+if [ $? -ne 0 ]; then
+    error "Build işlemi başarısız oldu!"
+fi
+
+# 11. PM2 Kurulumu
+log "PM2 kurulumu ve yapılandırması..."
+if ! command -v pm2 &> /dev/null; then
+    npm install -g pm2
+fi
 
 # PM2 ecosystem dosyası
 cat > ecosystem.config.js << EOF
@@ -101,7 +126,7 @@ module.exports = {
     name: 'butcapp',
     script: 'npm',
     args: 'start',
-    cwd: '/var/www/butcapp',
+    cwd: '$PROJECT_DIR',
     instances: 'max',
     exec_mode: 'cluster',
     env: {
@@ -121,23 +146,28 @@ module.exports = {
 };
 EOF
 
-# Log dosyaları oluşturma
+# Log dizinleri
 mkdir -p /var/log
 touch /var/log/butcapp-error.log
 touch /var/log/butcapp-out.log
 touch /var/log/butcapp-combined.log
 chown www-data:www-data /var/log/butcapp*.log
-chmod 644 /var/log/butcapp*.log
 
-# PM2 başlatma
+# 12. PM2 Başlatma
+log "PM2 ile uygulama başlatılıyor..."
 pm2 start ecosystem.config.js
 pm2 save
 pm2 startup
 
-# 11. Nginx Yapılandırması
-log "Nginx yapılandırılıyor..."
+# 13. Nginx Kurulumu
+log "Nginx kurulumu ve yapılandırması..."
+if ! command -v nginx &> /dev/null; then
+    apt install nginx -y
+    systemctl start nginx
+    systemctl enable nginx
+fi
 
-# Nginx config dosyası
+# Nginx config
 cat > /etc/nginx/sites-available/butcapp << EOF
 server {
     listen 80;
@@ -195,7 +225,7 @@ server {
     }
 
     # Static files caching
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)\$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
         proxy_pass http://localhost:3000;
@@ -204,42 +234,72 @@ server {
     # Health check
     location /health {
         access_log off;
-        return 200 "healthy\n";
+        return 200 "healthy\\n";
         add_header Content-Type text/plain;
     }
 }
 EOF
 
-# Site aktifleştirme
+# Site'ı aktif et
 ln -sf /etc/nginx/sites-available/butcapp /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 
 # Nginx test
 nginx -t
 
-# 12. Firewall Ayarları
-log "Firewall ayarları yapılıyor..."
-ufw allow ssh
-ufw allow 80
-ufw allow 443
-ufw --force enable
+if [ $? -ne 0 ]; then
+    error "Nginx yapılandırma hatası!"
+fi
 
-# 13. İzin Ayarları
-log "Dosya izinleri ayarlanıyor..."
-chown -R www-data:www-data /var/www/butcapp
-chmod -R 755 /var/www/butcapp
-
-# 14. Servislerin Başlatılması
-log "Servisler başlatılıyor..."
 systemctl restart nginx
-pm2 restart butcapp
 
-# 15. SSL Sertifikası (Domain ayarlarından sonra)
-warning "SSL sertifikası için domain'inizin sunucuya yönlendirildiğinden emin olun!"
-warning "SSL sertifikası almak için şu komutu çalıştırın:"
-warning "certbot --nginx -d butcapp.com -d www.butcapp.com"
+# 14. SSL Sertifikası (Let's Encrypt)
+log "SSL sertifikası kuruluyor..."
+if ! command -v certbot &> /dev/null; then
+    apt install certbot python3-certbot-nginx -y
+fi
 
-# 16. Monitor Script'i
+# SSL otomatik yenileme
+crontab -l | { cat; echo "0 12 * * * /usr/bin/certbot renew --quiet"; } | crontab -
+
+# 15. Firewall Ayarları
+log "Firewall ayarları yapılıyor..."
+if command -v ufw &> /dev/null; then
+    ufw allow ssh
+    ufw allow 80
+    ufw allow 443
+    ufw --force enable
+else
+    warning "UFW bulunamadı. Manuel olarak firewall ayarlarını yapın."
+fi
+
+# 16. İzinler
+log "Dosya izinleri ayarlanıyor..."
+chown -R www-data:www-data $PROJECT_DIR
+chmod -R 755 $PROJECT_DIR
+
+# 17. Servislerin Durumu
+log "Servisler kontrol ediliyor..."
+systemctl status nginx --no-pager -l
+pm2 status
+
+# 18. Test
+log "Uygulama test ediliyor..."
+sleep 5
+
+if curl -f http://localhost:3000 > /dev/null 2>&1; then
+    log "✅ Next.js uygulaması çalışıyor"
+else
+    error "❌ Next.js uygulaması çalışmıyor!"
+fi
+
+if curl -f http://localhost > /dev/null 2>&1; then
+    log "✅ Nginx çalışıyor"
+else
+    error "❌ Nginx çalışmıyor!"
+fi
+
+# 19. Monitor Script'i
 log "Monitor script'i oluşturuluyor..."
 cat > /home/monitor-butcapp.sh << 'EOF'
 #!/bin/bash
@@ -259,10 +319,10 @@ EOF
 
 chmod +x /home/monitor-butcapp.sh
 
-# Cron job for monitoring
-(crontab -l 2>/dev/null; echo "*/5 * * * * /home/monitor-butcapp.sh >> /var/log/butcapp-monitor.log 2>&1") | crontab -
+# Monitor için cron job
+crontab -l | { cat; echo "*/5 * * * * /home/monitor-butcapp.sh >> /var/log/butcapp-monitor.log 2>&1"; } | crontab -
 
-# 17. Update Script'i
+# 20. Update Script'i
 log "Update script'i oluşturuluyor..."
 cat > /home/update-butcapp.sh << 'EOF'
 #!/bin/bash
@@ -289,34 +349,30 @@ EOF
 
 chmod +x /home/update-butcapp.sh
 
-# 18. Bilgiler
-log "Kurulum tamamlandı!"
+# 21. Bilgiler
 echo ""
-echo "🎉 ButcApp başarıyla kuruldu!"
+log "🎉 DEPLOYMENT BAŞARILI!"
 echo ""
-echo "📊 Durum Kontrolü:"
-echo "  PM2: pm2 status"
-echo "  Nginx: systemctl status nginx"
-echo "  Loglar: pm2 logs butcapp"
+info "📋 Önemli Bilgiler:"
+echo "   • Uygulama Adresi: https://butcapp.com"
+echo "   • Admin Panel: https://butcapp.com/admin"
+echo "   • Admin Login: admin@butcapp.com / admin123"
+echo "   • PM2 Durumu: pm2 status"
+echo "   • PM2 Loglar: pm2 logs butcapp"
+echo "   • Nginx Durumu: systemctl status nginx"
+echo "   • Update için: /home/update-butcapp.sh"
+echo "   • Monitor için: /home/monitor-butcapp.sh"
 echo ""
-echo "🔄 Güncelleme: /home/update-butcapp.sh"
-echo "📊 Monitor: /home/monitor-butcapp.sh"
+info "🔧 Yönetim Komutları:"
+echo "   • Uygulamayı yeniden başlat: pm2 restart butcapp"
+echo "   • Uygulamayı durdur: pm2 stop butcapp"
+echo "   • Nginx yeniden başlat: systemctl restart nginx"
+echo "   • SSL yenileme: certbot renew"
 echo ""
-echo "🌐 Domain Ayarları:"
-echo "  A Record: @ -> SUNUCU_IP"
-echo "  A Record: www -> SUNUCU_IP"
-echo ""
-echo "🔒 SSL Kurulumu:"
-echo "  certbot --nginx -d butcapp.com -d www.butcapp.com"
-echo ""
-echo "✅ Test:"
-echo "  curl http://localhost:3000"
-echo "  curl -I http://localhost"
+warning "⚠️  Unutmayın:"
+echo "   • Domain DNS ayarlarını yapmayı unutmayın!"
+echo "   • SSL sertifikası almak için domain'in sunucuya yönlendirilmesi gerekir."
+echo "   • SSL almak için: certbot --nginx -d butcapp.com -d www.butcapp.com"
 echo ""
 
-# Servislerin son durumu
-log "Servislerin durumu kontrol ediliyor..."
-pm2 status
-systemctl status nginx --no-pager -l
-
-echo "🚀 Kurulum tamamlandı! ButcApp artık çalışıyor!"
+log "Deployment tamamlandı! ✅"
