@@ -144,7 +144,7 @@ export async function GET(request: NextRequest) {
       
       const results = await Promise.allSettled(promises)
       result = results
-        .filter((result): result.status === 'fulfilled' && result.value !== null)
+        .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled' && result.value !== null)
         .map((result) => result.value)
     }
     

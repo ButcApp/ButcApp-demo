@@ -116,6 +116,18 @@ export default function InvestmentsPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [investmentToDelete, setInvestmentToDelete] = useState<string | null>(null)
   
+  // Manual crypto investment states
+  const [showManualCryptoDialog, setShowManualCryptoDialog] = useState(false)
+  const [manualCryptoForm, setManualCryptoForm] = useState({
+    coin: '',
+    coinName: '',
+    buyPrice: 0,
+    amount: 0,
+    buyDate: new Date().toISOString().split('T')[0],
+    currentPrice: 0
+  })
+  const [isCreatingManualCrypto, setIsCreatingManualCrypto] = useState(false)
+  
   // Crypto states
   const [cryptoData, setCryptoData] = useState<CryptoItem[]>([])
   const [displayedCryptos, setDisplayedCryptos] = useState<CryptoItem[]>([])
@@ -208,30 +220,43 @@ export default function InvestmentsPage() {
       console.log('Fetching investments for userId:', userId)
       
       // Fetch both investments and current currency rates
-      const [investmentsResponse, currencyResponse] = await Promise.all([
+      const [investmentsResponse, currencyResponse, cryptoResponse] = await Promise.all([
         fetch(`/api/investments?userId=${userId}`),
-        fetch('/api/currency')
+        fetch('/api/currency'),
+        fetch('/api/crypto')
       ])
       
       const investmentsResult = await investmentsResponse.json()
       const currencyResult = await currencyResponse.json()
+      const cryptoResult = await cryptoResponse.json()
       
       console.log('Investments API response:', investmentsResult)
       console.log('Currency API response:', currencyResult)
+      console.log('Crypto API response:', cryptoResult)
       
       if (investmentsResult.success) {
         let investmentsData = investmentsResult.data || []
         
         // Create current prices map
         const currentPrices: Record<string, number> = {}
+        
+        // Add currency prices
         if (currencyResult.success && currencyResult.data) {
           currencyResult.data.forEach((item: any) => {
             // Extract currency code from symbol (USD from USD/TRY, EUR from EUR/TRY, etc.)
             const currencyCode = item.symbol.split('/')[0]
             if (currencyCode) {
               currentPrices[item.symbol] = item.price // Use full symbol as key
-              console.log(`Mapped ${item.symbol}: ${item.price}`)
+              console.log(`Mapped currency ${item.symbol}: ${item.price}`)
             }
+          })
+        }
+        
+        // Add crypto prices
+        if (cryptoResult.success && cryptoResult.data) {
+          cryptoResult.data.forEach((item: any) => {
+            currentPrices[item.symbol] = item.price // Use crypto symbol as key
+            console.log(`Mapped crypto ${item.symbol}: ${item.price}`)
           })
         }
         
@@ -567,6 +592,68 @@ export default function InvestmentsPage() {
     }
   }
 
+  // Create manual crypto investment
+  const createManualCryptoInvestment = async () => {
+    if (!manualCryptoForm.coin || !manualCryptoForm.coinName || manualCryptoForm.buyPrice <= 0 || manualCryptoForm.amount <= 0 || !user) {
+      console.error('Missing required fields for manual crypto investment:', {
+        coin: manualCryptoForm.coin,
+        coinName: manualCryptoForm.coinName,
+        buyPrice: manualCryptoForm.buyPrice,
+        amount: manualCryptoForm.amount,
+        user: !!user
+      })
+      return
+    }
+    
+    setIsCreatingManualCrypto(true)
+    try {
+      const requestData = {
+        userId: user.id,
+        currency: manualCryptoForm.coin,
+        currencyName: manualCryptoForm.coinName,
+        amount: manualCryptoForm.amount,
+        buyPrice: manualCryptoForm.buyPrice,
+        buyDate: manualCryptoForm.buyDate
+      }
+
+      console.log('Creating manual crypto investment with data:', requestData)
+      
+      const response = await fetch('/api/investments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData)
+      })
+      
+      const result = await response.json()
+      
+      console.log('Manual crypto investment creation response:', result)
+      
+      if (result.success) {
+        // Refresh investments list
+        await fetchInvestments(user.id)
+        
+        // Reset form and close dialog
+        setManualCryptoForm({
+          coin: '',
+          coinName: '',
+          buyPrice: 0,
+          amount: 0,
+          buyDate: new Date().toISOString().split('T')[0],
+          currentPrice: 0
+        })
+        setShowManualCryptoDialog(false)
+      } else {
+        console.error('Failed to create manual crypto investment:', result.error)
+      }
+    } catch (error) {
+      console.error('Manual crypto investment creation error:', error)
+    } finally {
+      setIsCreatingManualCrypto(false)
+    }
+  }
+
   // Open investment dialog
   const openInvestmentDialog = (currency: CurrencyItem | CryptoItem) => {
     setSelectedCurrency(currency)
@@ -867,17 +954,29 @@ export default function InvestmentsPage() {
             </p>
           )}
         </div>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={fetchCryptoData}
-          disabled={isLoadingCrypto}
-          className="shrink-0"
-        >
-          <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingCrypto ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">{isLoadingCrypto ? 'Yenileniyor...' : 'Yenile'}</span>
-          <span className="sm:hidden">{isLoadingCrypto ? '...' : '↻'}</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setShowManualCryptoDialog(true)}
+            className="shrink-0"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            <span className="hidden sm:inline">Manuel Ekle</span>
+            <span className="sm:hidden">+</span>
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={fetchCryptoData}
+            disabled={isLoadingCrypto}
+            className="shrink-0"
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingCrypto ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{isLoadingCrypto ? 'Yenileniyor...' : 'Yenile'}</span>
+            <span className="sm:hidden">{isLoadingCrypto ? '...' : '↻'}</span>
+          </Button>
+        </div>
       </div>
       <div className="grid gap-4">
         {data.length === 0 ? (
@@ -936,15 +1035,9 @@ export default function InvestmentsPage() {
                         </div>
                       </div>
                     </div>
-                    <Button 
-                      size="sm" 
-                      className="w-full sm:w-auto shrink-0"
-                      onClick={() => openInvestmentDialog(item)}
-                    >
-                      <Zap className="w-4 h-4 mr-1" />
-                      <span className="hidden sm:inline">Hızlı Yatırım</span>
-                      <span className="sm:hidden">Yatırım</span>
-                    </Button>
+                    <div className="text-sm text-muted-foreground text-center">
+                      Manuel yatırım için üstteki "Manuel Ekle" butonunu kullanın
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -1270,6 +1363,157 @@ export default function InvestmentsPage() {
                   </div>
                 ) : (
                   'Yatırım Yap'
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual Crypto Investment Dialog */}
+      <Dialog open={showManualCryptoDialog} onOpenChange={setShowManualCryptoDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bitcoin className="w-5 h-5" />
+              Manuel Kripto Yatırımı
+            </DialogTitle>
+            <DialogDescription>
+              API sınırlamaları nedeniyle kripto yatırımlarınızı manuel olarak ekleyin
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="coin">Coin Seçimi</Label>
+                <Select 
+                  value={manualCryptoForm.coin} 
+                  onValueChange={(value) => {
+                    const selectedCoin = cryptoData.find(coin => coin.symbol === value)
+                    setManualCryptoForm(prev => ({
+                      ...prev,
+                      coin: value,
+                      coinName: selectedCoin?.name || '',
+                      currentPrice: selectedCoin?.price || 0
+                    }))
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Coin seçin..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cryptoData.map((coin) => (
+                      <SelectItem key={coin.symbol} value={coin.symbol}>
+                        {coin.symbol} - {coin.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="coinName">Coin Adı</Label>
+                <Input
+                  id="coinName"
+                  value={manualCryptoForm.coinName}
+                  onChange={(e) => setManualCryptoForm(prev => ({ ...prev, coinName: e.target.value }))}
+                  placeholder="Bitcoin, Ethereum, vb."
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="buyPrice">Alış Fiyatı ($)</Label>
+                <Input
+                  id="buyPrice"
+                  type="number"
+                  step="0.01"
+                  value={manualCryptoForm.buyPrice || ''}
+                  onChange={(e) => setManualCryptoForm(prev => ({ ...prev, buyPrice: parseFloat(e.target.value) || 0 }))}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <Label htmlFor="amount">Miktar</Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.00000001"
+                  value={manualCryptoForm.amount || ''}
+                  onChange={(e) => setManualCryptoForm(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
+                  placeholder="0.00000000"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="buyDate">Alış Tarihi</Label>
+              <Input
+                id="buyDate"
+                type="date"
+                value={manualCryptoForm.buyDate}
+                onChange={(e) => setManualCryptoForm(prev => ({ ...prev, buyDate: e.target.value }))}
+                max={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+
+            {manualCryptoForm.buyPrice > 0 && manualCryptoForm.amount > 0 && (
+              <div className="p-3 bg-muted/50 rounded-lg">
+                <div className="text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span>Toplam Yatırım:</span>
+                    <span className="font-medium">
+                      ${formatPrice(manualCryptoForm.buyPrice * manualCryptoForm.amount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Alış Fiyatı:</span>
+                    <span className="font-medium">
+                      ${formatPrice(manualCryptoForm.buyPrice)}
+                    </span>
+                  </div>
+                  {manualCryptoForm.currentPrice > 0 && (
+                    <div className="flex justify-between">
+                      <span>Mevcut Fiyat:</span>
+                      <span className="font-medium">
+                        ${formatPrice(manualCryptoForm.currentPrice)}
+                      </span>
+                    </div>
+                  )}
+                  {manualCryptoForm.currentPrice > 0 && manualCryptoForm.currentPrice !== manualCryptoForm.buyPrice && (
+                    <div className="flex justify-between">
+                      <span>Tahmini Kar/Zarar:</span>
+                      <span className={`font-medium ${
+                        (manualCryptoForm.currentPrice - manualCryptoForm.buyPrice) >= 0 ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {((manualCryptoForm.currentPrice - manualCryptoForm.buyPrice) >= 0 ? '+' : '')}${formatPrice((manualCryptoForm.currentPrice - manualCryptoForm.buyPrice) * manualCryptoForm.amount)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end space-x-2 pt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => setShowManualCryptoDialog(false)}
+                disabled={isCreatingManualCrypto}
+              >
+                İptal
+              </Button>
+              <Button 
+                onClick={createManualCryptoInvestment}
+                disabled={isCreatingManualCrypto || !manualCryptoForm.coin || !manualCryptoForm.coinName || manualCryptoForm.buyPrice <= 0 || manualCryptoForm.amount <= 0}
+              >
+                {isCreatingManualCrypto ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Oluşturuluyor...
+                  </div>
+                ) : (
+                  'Yatırım Ekle'
                 )}
               </Button>
             </div>
