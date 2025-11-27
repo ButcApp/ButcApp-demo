@@ -1,18 +1,23 @@
 'use client'
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
-import { User, Session, AuthError } from '@supabase/supabase-js'
-import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+
+interface User {
+  id: string
+  email: string
+  name?: string
+  avatar_url?: string
+  full_name?: string
+}
 
 interface AuthContextType {
   user: User | null
-  session: Session | null
   loading: boolean
-  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: AuthError | null }>
-  signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>
+  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: any | null }>
+  signIn: (email: string, password: string) => Promise<{ error: any | null }>
   signOut: () => Promise<void>
-  resetPassword: (email: string) => Promise<{ error: AuthError | null }>
+  resetPassword: (email: string) => Promise<{ error: any | null }>
   updateUser: () => Promise<void>
 }
 
@@ -24,153 +29,91 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null)
-  const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
-    // Get initial session
-    const getSession = async () => {
-      if (!supabase) {
-        console.error('Supabase client not initialized')
-        setLoading(false)
-        return
+    // Local storage'dan user'ı kontrol et
+    const savedUser = localStorage.getItem('user')
+    if (savedUser) {
+      try {
+        setUser(JSON.parse(savedUser))
+      } catch (error) {
+        console.error('Error parsing saved user:', error)
+        localStorage.removeItem('user')
       }
-      
-      const { data: { session }, error } = await supabase.auth.getSession()
-      if (error) {
-        console.error('Error getting session:', error)
-      } else {
-        setSession(session)
-        setUser(session?.user ?? null)
-      }
-      setLoading(false)
     }
-
-    getSession()
-
-    // Listen for auth changes
-    if (supabase) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(
-        async (event, session) => {
-          console.log('Auth state changed:', event, session)
-          setSession(session)
-          setUser(session?.user ?? null)
-          setLoading(false)
-
-          // Create or update user profile and redirect to app
-          if (session?.user) {
-            // Profile oluşturma işlemini beklemeden yönlendir
-            createOrUpdateProfile(session.user)
-            // Giriş başarılı olursa hemen app sayfasına yönlendir
-            router.push('/app')
-          }
-        }
-      )
-
-      return () => subscription.unsubscribe()
-    }
+    setLoading(false)
   }, [])
-
-  const createOrUpdateProfile = async (user: User) => {
-    try {
-      if (!supabase) {
-        console.error('Supabase client not initialized')
-        return
-      }
-      
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
-          id: user.id,
-          email: user.email!,
-          full_name: user.user_metadata?.full_name || null,
-          avatar_url: user.user_metadata?.avatar_url || null,
-          updated_at: new Date().toISOString()
-        })
-
-      if (error) {
-        console.error('Error creating/updating profile:', error)
-      }
-    } catch (error) {
-      console.error('Error in createOrUpdateProfile:', error)
-    }
-  }
 
   const signUp = async (email: string, password: string, fullName?: string) => {
     try {
-      if (!supabase) {
-        return { error: { message: 'Supabase client not initialized' } as AuthError }
-      }
-      
       console.log('Attempting to sign up with email:', email)
-      console.log('Password length:', password.length)
-      console.log('Full name:', fullName)
       
-      // Loading state'ini başlat
-      setLoading(true)
-      
-      const { data, error } = await supabase.auth.signUp({
+      // Mock signup - her zaman başarılı
+      const newUser: User = {
+        id: `user_${Date.now()}`,
         email: email.trim().toLowerCase(),
-        password,
-        options: {
-          data: {
-            full_name: fullName || null
-          }
-        }
-      })
+        full_name: fullName || null,
+        name: fullName || email.split('@')[0]
+      }
 
-      console.log('Supabase response:', { data, error })
+      // Local storage'a kaydet
+      localStorage.setItem('user', JSON.stringify(newUser))
+      setUser(newUser)
+
+      // App sayfasına yönlendir
+      router.push('/app')
       
-      // Loading state'ini bitir
-      setLoading(false)
-      
-      return { error }
+      return { error: null }
     } catch (error) {
       console.error('Signup error:', error)
-      setLoading(false)
-      return { error: error as AuthError }
+      return { error: error as any }
     }
   }
 
   const signIn = async (email: string, password: string) => {
     try {
-      if (!supabase) {
-        return { error: { message: 'Supabase client not initialized' } as AuthError }
-      }
-      
       console.log('Attempting to sign in with email:', email)
-      console.log('Password length:', password.length)
       
-      // Loading state'ini başlat
-      setLoading(true)
-      
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password
-      })
+      // Mock authentication
+      if (email === 'admin@butcapp.com' && password === 'admin123') {
+        const adminUser: User = {
+          id: 'admin123',
+          email: 'admin@butcapp.com',
+          name: 'Admin',
+          full_name: 'ButcApp Admin'
+        }
 
-      console.log('Supabase sign in response:', { data, error })
+        localStorage.setItem('user', JSON.stringify(adminUser))
+        setUser(adminUser)
+        router.push('/app')
+        return { error: null }
+      }
+
+      // Regular user login
+      const regularUser: User = {
+        id: `user_${Date.now()}`,
+        email: email.trim().toLowerCase(),
+        name: email.split('@')[0]
+      }
+
+      localStorage.setItem('user', JSON.stringify(regularUser))
+      setUser(regularUser)
+      router.push('/app')
       
-      // Loading state'ini bitir (AuthContext'teki onAuthStateChange yönlendirmeyi yapacak)
-      setLoading(false)
-      
-      return { error }
+      return { error: null }
     } catch (error) {
       console.error('Signin error:', error)
-      setLoading(false)
-      return { error: error as AuthError }
+      return { error: error as any }
     }
   }
 
   const signOut = async () => {
     try {
-      if (!supabase) {
-        console.error('Supabase client not initialized')
-        return
-      }
-      
-      await supabase.auth.signOut()
+      localStorage.removeItem('user')
+      setUser(null)
+      router.push('/')
     } catch (error) {
       console.error('Error signing out:', error)
     }
@@ -178,33 +121,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const resetPassword = async (email: string) => {
     try {
-      if (!supabase) {
-        return { error: { message: 'Supabase client not initialized' } as AuthError }
-      }
-      
-      console.log('Attempting to reset password for email:', email)
-      
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase())
-      console.log('Password reset response:', { error })
-      return { error }
+      console.log('Password reset requested for email:', email)
+      // Mock password reset - her zaman başarılı
+      return { error: null }
     } catch (error) {
       console.error('Password reset error:', error)
-      return { error: error as AuthError }
+      return { error: error as any }
     }
   }
 
   const updateUser = async () => {
     try {
-      if (!supabase) {
-        console.error('Supabase client not initialized')
-        return
-      }
-      
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.user) {
-        setSession(session)
-        setUser(session.user)
-        await createOrUpdateProfile(session.user)
+      const savedUser = localStorage.getItem('user')
+      if (savedUser) {
+        const userData = JSON.parse(savedUser)
+        setUser(userData)
       }
     } catch (error) {
       console.error('Error updating user:', error)
@@ -213,7 +144,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const value: AuthContextType = {
     user,
-    session,
     loading,
     signUp,
     signIn,

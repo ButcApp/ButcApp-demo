@@ -1,5 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+
+// Mock data - Database kullanmadan
+let mockInvestments: any[] = [
+  {
+    id: 1,
+    user_id: 'demo-user',
+    currency: 'BTC',
+    currency_name: 'Bitcoin',
+    amount: 0.5,
+    buy_price: 45000,
+    buy_date: '2024-01-01',
+    sell_price: null,
+    sell_date: null,
+    current_value: 47500,
+    profit: 1250,
+    profit_percent: 2.78,
+    status: 'active',
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z'
+  },
+  {
+    id: 2,
+    user_id: 'demo-user',
+    currency: 'ETH',
+    currency_name: 'Ethereum',
+    amount: 10,
+    buy_price: 2500,
+    buy_date: '2024-01-15',
+    sell_price: null,
+    sell_date: null,
+    current_value: 2650,
+    profit: 1500,
+    profit_percent: 6.0,
+    status: 'active',
+    created_at: '2024-01-15T00:00:00Z',
+    updated_at: '2024-01-15T00:00:00Z'
+  }
+]
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,27 +52,15 @@ export async function GET(request: NextRequest) {
 
     console.log(`📊 Fetching investments for user: ${userId}`)
 
-    const { data, error } = await supabaseAdmin
-      .from('investments')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
+    // Filter investments by user_id
+    const userInvestments = mockInvestments.filter(inv => inv.user_id === userId)
 
-    if (error) {
-      console.error('❌ Supabase error:', error)
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to fetch investments',
-        details: error.message
-      }, { status: 500 })
-    }
-
-    console.log(`✅ Successfully fetched ${data?.length || 0} investments from Supabase`)
+    console.log(`✅ Successfully fetched ${userInvestments.length} investments`)
     
     return NextResponse.json({
       success: true,
-      data: data || [],
-      count: data?.length || 0,
+      data: userInvestments,
+      count: userInvestments.length,
       timestamp: new Date().toISOString()
     })
 
@@ -86,7 +111,8 @@ export async function POST(request: NextRequest) {
     const profit = 0
     const profitPercent = 0
 
-    const insertData = {
+    const newInvestment = {
+      id: Date.now(),
       user_id: userId,
       currency,
       currency_name: currencyName,
@@ -98,37 +124,19 @@ export async function POST(request: NextRequest) {
       current_value: currentValue,
       profit,
       profit_percent: profitPercent,
-      status: status || 'active'
+      status: status || 'active',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     }
 
-    console.log('💾 Insert data prepared:', insertData)
+    console.log('💾 New investment created:', newInvestment)
 
-    const { data, error } = await supabaseAdmin
-      .from('investments')
-      .insert(insertData)
-      .select()
-      .single()
-
-    if (error) {
-      console.error('❌ Supabase insert error:', {
-        error,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code
-      })
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to create investment',
-        details: error.message
-      }, { status: 500 })
-    }
-
-    console.log('✅ Investment created successfully:', data)
+    // Add to mock data
+    mockInvestments.push(newInvestment)
 
     return NextResponse.json({
       success: true,
-      data: data,
+      data: newInvestment,
       message: 'Investment created successfully',
       timestamp: new Date().toISOString()
     })
@@ -156,36 +164,26 @@ export async function PUT(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // Add updated_at timestamp
-    updateData.updated_at = new Date().toISOString()
-
-    const { data, error } = await supabaseAdmin
-      .from('investments')
-      .update(updateData)
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Supabase error:', error)
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to update investment',
-        details: error.message
-      }, { status: 500 })
-    }
-
-    if (!data) {
+    // Find investment
+    const investmentIndex = mockInvestments.findIndex(inv => inv.id === id && inv.user_id === userId)
+    
+    if (investmentIndex === -1) {
       return NextResponse.json({
         success: false,
         error: 'Investment not found or access denied'
       }, { status: 404 })
     }
 
+    // Update investment
+    mockInvestments[investmentIndex] = {
+      ...mockInvestments[investmentIndex],
+      ...updateData,
+      updated_at: new Date().toISOString()
+    }
+
     return NextResponse.json({
       success: true,
-      data: data,
+      data: mockInvestments[investmentIndex],
       message: 'Investment updated successfully',
       timestamp: new Date().toISOString()
     })
@@ -213,33 +211,21 @@ export async function DELETE(request: NextRequest) {
       }, { status: 400 })
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('investments')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Supabase error:', error)
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to delete investment',
-        details: error.message
-      }, { status: 500 })
-    }
-
-    if (!data) {
+    // Find and remove investment
+    const investmentIndex = mockInvestments.findIndex(inv => inv.id === parseInt(id) && inv.user_id === userId)
+    
+    if (investmentIndex === -1) {
       return NextResponse.json({
         success: false,
         error: 'Investment not found or access denied'
       }, { status: 404 })
     }
 
+    const deletedInvestment = mockInvestments.splice(investmentIndex, 1)[0]
+
     return NextResponse.json({
       success: true,
-      data: data,
+      data: deletedInvestment,
       message: 'Investment deleted successfully',
       timestamp: new Date().toISOString()
     })

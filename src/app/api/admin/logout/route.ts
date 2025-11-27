@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 
 export async function POST(request: NextRequest) {
   try {
-    // Log kaydı oluştur
+    // Log kaydı oluştur (mock)
     const token = request.cookies.get('admin-token')?.value
     
     if (token) {
@@ -11,15 +10,8 @@ export async function POST(request: NextRequest) {
         const decoded = Buffer.from(token, 'base64').toString('utf-8')
         const [adminId] = decoded.split(':')
         
-        // Admin log kaydı
-        await db.adminLog.create({
-          data: {
-            adminId,
-            action: 'LOGOUT',
-            ipAddress: request.ip || 'unknown',
-            userAgent: request.headers.get('user-agent') || 'unknown'
-          }
-        })
+        // Mock admin log kaydı
+        console.log(`Admin logout: ${adminId} at ${new Date().toISOString()}`)
       } catch (error) {
         console.error('Logout log error:', error)
       }

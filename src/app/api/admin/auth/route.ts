@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+
+// Mock admin data
+const mockAdmin = {
+  id: 'admin123',
+  username: 'admin',
+  email: 'admin@butcapp.com',
+  name: 'ButcApp Admin',
+  role: 'admin',
+  isActive: true,
+  lastLogin: new Date().toISOString(),
+  createdAt: '2024-01-01T00:00:00Z'
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,34 +30,59 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Token süresi dolmuş' }, { status: 401 })
     }
 
-    // Admin bilgilerini getir
-    const admin = await db.admin.findUnique({
-      where: { id: adminId },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        name: true,
-        role: true,
-        isActive: true,
-        lastLogin: true,
-        createdAt: true
-      }
-    })
-
-    if (!admin || !admin.isActive) {
+    // Mock admin kontrolü
+    if (adminId !== 'admin123' || username !== 'admin') {
       return NextResponse.json({ error: 'Geçersiz kullanıcı' }, { status: 401 })
     }
 
     return NextResponse.json({
       success: true,
-      admin
+      admin: mockAdmin
     })
 
   } catch (error) {
     console.error('Auth check error:', error)
     return NextResponse.json(
       { error: 'Sunucu hatası' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { email, password } = await request.json()
+    
+    // Mock authentication
+    if (email === 'admin@butcapp.com' && password === 'admin123') {
+      // Create simple token
+      const token = Buffer.from(`${mockAdmin.id}:${mockAdmin.username}:${Date.now()}`).toString('base64')
+      
+      // Set token cookie
+      const response = NextResponse.json({
+        success: true,
+        admin: mockAdmin,
+        token: token
+      })
+      
+      response.cookies.set('admin-token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 24 * 60 * 60 // 24 hours
+      })
+      
+      return response
+    }
+    
+    return NextResponse.json(
+      { success: false, error: 'Invalid credentials' },
+      { status: 401 }
+    )
+  } catch (error) {
+    console.error('Login error:', error)
+    return NextResponse.json(
+      { success: false, error: 'Authentication failed' },
       { status: 500 }
     )
   }
