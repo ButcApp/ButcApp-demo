@@ -93,7 +93,7 @@ export default function InvestmentsPage() {
   
   // Investment states
   const [showInvestmentDialog, setShowInvestmentDialog] = useState(false)
-  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyItem | null>(null)
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyItem | CryptoItem | null>(null)
   const [investments, setInvestments] = useState<Investment[]>([])
   const [isLoadingInvestments, setIsLoadingInvestments] = useState(false)
   const [investmentForm, setInvestmentForm] = useState<InvestmentFormData>({
@@ -545,7 +545,7 @@ export default function InvestmentsPage() {
 
   // Open investment dialog
   const openInvestmentDialog = (currency: CurrencyItem | CryptoItem) => {
-    setSelectedCurrency(currency as any)
+    setSelectedCurrency(currency)
     setInvestmentForm(prev => ({
       ...prev,
       currency: currency.symbol,
