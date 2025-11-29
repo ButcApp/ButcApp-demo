@@ -1,0 +1,126 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// Blog Categories
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  posts Post[]
+
+  @@map("categories")
+}
+
+// Blog Posts
+model Post {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  excerpt     String?
+  content     String
+  coverImage  String?
+  status      String   @default("DRAFT") // DRAFT | PUBLISHED | ARCHIVED
+  featured    Boolean  @default(false)
+  viewCount   Int      @default(0)
+  readTime    Int      // estimated reading time in minutes
+  seoTitle    String?
+  seoDescription String?
+  keywords    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  publishedAt DateTime?
+
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+
+  tags        PostTag[]
+  comments    Comment[]
+
+  @@map("posts")
+}
+
+// Users for blog
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  avatar    String?
+  bio       String?
+  role      String   @default("AUTHOR") // ADMIN | AUTHOR | EDITOR
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  posts     Post[]
+  comments  Comment[]
+
+  @@map("users")
+}
+
+// Tags
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  color     String?  @default("#6B7280")
+  createdAt DateTime @default(now())
+
+  posts     PostTag[]
+
+  @@map("tags")
+}
+
+// Post-Tag relationship
+model PostTag {
+  postId String
+  tagId  String
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@map("post_tags")
+}
+
+// Comments
+model Comment {
+  id        String      @id @default(cuid())
+  content   String
+  authorName String?
+  authorEmail String?
+  status    String      @default("PENDING") // PENDING | APPROVED | REJECTED | SPAM
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  postId    String
+  post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  authorId  String?
+  author    User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  parentId  String?
+  parent    Comment?    @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[]   @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+// Enums converted to strings for SQLite compatibility
+// PostStatus: DRAFT | PUBLISHED | ARCHIVED
+// UserRole: ADMIN | AUTHOR | EDITOR  
+// CommentStatus: PENDING | APPROVED | REJECTED | SPAM

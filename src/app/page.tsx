@@ -206,6 +206,16 @@ export default function HomePage() {
                 {t('home.start')}
                 <ArrowRight className="ml-2 w-5 h-5" />
               </Button>
+              <Link href="/blog">
+                <Button 
+                  size="lg" 
+                  variant="outline"
+                  className="border-green-600 text-green-600 hover:bg-green-600 hover:text-white px-12 py-4 text-xl font-medium transition-all duration-300"
+                >
+                  Blog
+                  <ArrowRight className="ml-2 w-5 h-5" />
+                </Button>
+              </Link>
             </div>
 
             {/* Nasıl Kullanılır Butonu */}
